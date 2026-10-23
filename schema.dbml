@@ -1,0 +1,143 @@
+// BudgetBuddy - Full-Stack Student Budget & Expense Platform
+// Database Schema (DBML for https://dbdiagram.io)
+
+Table users as U {
+  id integer [pk, increment]
+  email varchar(255) [unique, not null, note: "Used as USERNAME_FIELD for login"]
+  username varchar(150) [unique, not null]
+  password varchar(128) [not null]
+  first_name varchar(150) [default: ""]
+  last_name varchar(150) [default: ""]
+  role varchar(10) [not null, default: "student", note: "student, premium, admin"]
+  is_staff boolean [default: false]
+  is_active boolean [default: true]
+  date_joined timestamp [default: `now()`]
+
+  indexes {
+    email [unique]
+    role
+  }
+}
+
+Table profiles as P {
+  id integer [pk, increment]
+  user_id integer [unique, not null]
+  monthly_income decimal(12, 2) [default: 0.00]
+  currency varchar(5) [default: "INR"]
+  financial_preferences jsonb [note: "alert_threshold, daily_reminder, dark_mode"]
+  avatar varchar(255) [null, note: "File path in media/avatars/"]
+  created_at timestamp [default: `now()`]
+  updated_at timestamp [default: `now()`]
+
+  indexes {
+    user_id [unique]
+  }
+}
+
+Table expenses as E {
+  id integer [pk, increment]
+  user_id integer [not null]
+  category varchar(15) [not null, note: "food, travel, shopping, education, entertainment, misc"]
+  title varchar(120) [not null]
+  amount decimal(12, 2) [not null]
+  date date [not null]
+  payment_method varchar(12) [not null, default: "cash", note: "cash, upi, card, bank"]
+  notes text [default: ""]
+  created_at timestamp [default: `now()`]
+  updated_at timestamp [default: `now()`]
+
+  indexes {
+    (user_id, date) [name: "ix_expense_user_date"]
+    (user_id, category) [name: "ix_expense_user_category"]
+  }
+}
+
+Table incomes as I {
+  id integer [pk, increment]
+  user_id integer [not null]
+  source_type varchar(20) [not null, default: "pocket_money", note: "pocket_money, scholarship, freelance, part_time, gift, other"]
+  title varchar(120) [not null]
+  amount decimal(12, 2) [not null]
+  date date [not null]
+  notes text [default: ""]
+  created_at timestamp [default: `now()`]
+  updated_at timestamp [default: `now()`]
+
+  indexes {
+    (user_id, date) [name: "ix_income_user_date"]
+    (user_id, source_type) [name: "ix_income_user_source"]
+  }
+}
+
+Table budgets as B {
+  id integer [pk, increment]
+  user_id integer [not null]
+  month date [not null, note: "Stored as YYYY-MM-01 (first day of the month)"]
+  category varchar(15) [not null, note: "food, travel, shopping, education, entertainment, misc"]
+  limit_amount decimal(12, 2) [not null, note: "Monthly cap for this category"]
+  created_at timestamp [default: `now()`]
+  updated_at timestamp [default: `now()`]
+
+  indexes {
+    (user_id, month, category) [unique, name: "uq_budget_user_month_category"]
+    (user_id, month) [name: "ix_budget_user_month"]
+  }
+}
+
+Table savings_goals as SG {
+  id integer [pk, increment]
+  user_id integer [not null]
+  title varchar(120) [not null]
+  description text [default: ""]
+  target_amount decimal(12, 2) [not null]
+  current_amount decimal(12, 2) [not null, default: 0.00, note: "saved_amount"]
+  target_date date [null, note: "deadline; null = open-ended"]
+  priority varchar(10) [default: "medium", note: "low, medium, high"]
+  is_completed boolean [default: false]
+  created_at timestamp [default: `now()`]
+  updated_at timestamp [default: `now()`]
+
+  indexes {
+    (user_id, is_completed) [name: "ix_goal_user_status"]
+    (user_id, target_date) [name: "ix_goal_user_deadline"]
+  }
+}
+
+Table notifications as N {
+  id integer [pk, increment]
+  user_id integer [not null]
+  notification_type varchar(10) [not null, default: "system", note: "budget, savings, goal, report, system"]
+  title varchar(120) [not null]
+  message text [default: ""]
+  is_read boolean [default: false]
+  created_at timestamp [default: `now()`]
+
+  indexes {
+    (user_id, is_read)
+    (user_id, created_at)
+  }
+}
+
+Table reports as R {
+  id integer [pk, increment]
+  user_id integer [not null]
+  report_type varchar(10) [not null, default: "monthly", note: "monthly, expense, income, savings"]
+  month date [not null, note: "First day of reported month (YYYY-MM-01)"]
+  file_format varchar(10) [default: "pdf", note: "pdf, excel"]
+  file varchar(255) [null, note: "File path in media/reports/"]
+  summary jsonb [note: "JSON snapshot of monthly totals"]
+  generated_at timestamp [default: `now()`]
+
+  indexes {
+    (user_id, month)
+  }
+}
+
+// Relationships
+Ref: P.user_id - U.id [delete: cascade]
+Ref: E.user_id > U.id [delete: cascade]
+Ref: I.user_id > U.id [delete: cascade]
+Ref: B.user_id > U.id [delete: cascade]
+Ref: SG.user_id > U.id [delete: cascade]
+Ref: N.user_id > U.id [delete: cascade]
+Ref: R.user_id > U.id [delete: cascade]
