@@ -1,3 +1,6 @@
+import os
+import uuid
+
 from django.contrib.auth import get_user_model
 from django.urls import reverse
 from rest_framework import status
@@ -5,16 +8,20 @@ from rest_framework.test import APITestCase
 
 User = get_user_model()
 
+# Dynamically generated or environment-provided test secret credentials:
+TEST_PASSWORD = os.getenv("TEST_USER_PASSWORD", f"Test_{uuid.uuid4().hex[:10]}!Aa1")
+
 
 class AuthFlowTests(APITestCase):
-    def register(self, email="student@example.com", username="student", password="Str0ngPass!23"):
+    def register(self, email="student@example.com", username="student", password=None):
+        pwd = password or TEST_PASSWORD
         response = self.client.post(
             reverse("auth-register"),
             {
                 "email": email,
                 "username": username,
-                "password": password,
-                "password_confirm": password,
+                "password": pwd,
+                "password_confirm": pwd,
                 "first_name": "Test",
             },
             format="json",
@@ -41,8 +48,8 @@ class AuthFlowTests(APITestCase):
             {
                 "email": "student@example.com",
                 "username": "student",
-                "password": "Str0ngPass!23",
-                "password_confirm": "Different!234",
+                "password": TEST_PASSWORD,
+                "password_confirm": f"{TEST_PASSWORD}_mismatch",
             },
             format="json",
         )
@@ -52,7 +59,7 @@ class AuthFlowTests(APITestCase):
         self.register()
         response = self.client.post(
             reverse("auth-login"),
-            {"email": "student@example.com", "password": "Str0ngPass!23"},
+            {"email": "student@example.com", "password": TEST_PASSWORD},
             format="json",
         )
         self.assertEqual(response.status_code, status.HTTP_200_OK)
@@ -63,7 +70,7 @@ class AuthFlowTests(APITestCase):
         self.register()
         response = self.client.post(
             reverse("auth-login"),
-            {"email": "student@example.com", "password": "wrong-password"},
+            {"email": "student@example.com", "password": f"{TEST_PASSWORD}_wrong"},
             format="json",
         )
         self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
@@ -98,10 +105,10 @@ class AuthFlowTests(APITestCase):
 
     def test_admin_can_change_user_role(self):
         user = User.objects.create_user(
-            username="member", email="member@example.com", password="Str0ngPass!23"
+            username="member", email="member@example.com", password=TEST_PASSWORD
         )
         admin = User.objects.create_user(
-            username="root", email="admin@example.com", password="Str0ngPass!23", is_staff=True, role=User.Role.ADMIN
+            username="root", email="admin@example.com", password=TEST_PASSWORD, is_staff=True, role=User.Role.ADMIN
         )
         self.client.force_authenticate(admin)
         response = self.client.patch(
@@ -124,7 +131,7 @@ class AuthFlowTests(APITestCase):
 
         # 3. Admin -> 200
         admin = User.objects.create_user(
-            username="superadmin", email="superadmin@example.com", password="Str0ngPass!23", is_staff=True, role=User.Role.ADMIN
+            username="superadmin", email="superadmin@example.com", password=TEST_PASSWORD, is_staff=True, role=User.Role.ADMIN
         )
         self.client.force_authenticate(admin)
         res_admin = self.client.get(reverse("auth-admin-only"))

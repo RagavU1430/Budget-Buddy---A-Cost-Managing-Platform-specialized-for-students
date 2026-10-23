@@ -199,15 +199,19 @@ Pre-configured demo users across all 3 roles:
 
 | Role | Email | Password | Monthly Income |
 |---|---|---|---|
-| **🎓 Student** | `student@budgetbuddy.local` | `Student123!` | ₹12,000 |
-| **⭐ Premium** | `premium@budgetbuddy.local` | `Premium123!` | ₹25,000 |
-| **🛡️ Admin** | `admin@budgetbuddy.local` | `Admin123!` | ₹50,000 |
+| **🎓 Student** | `student@budgetbuddy.local` | *(Configured via `.env` or CLI)* | ₹12,000 |
+| **⭐ Premium** | `premium@budgetbuddy.local` | *(Configured via `.env` or CLI)* | ₹25,000 |
+| **🛡️ Admin** | `admin@budgetbuddy.local` | *(Configured via `.env` or CLI)* | ₹50,000 |
 
-To re-seed or ensure demo accounts exist in the database, run:
+To seed or refresh demo accounts in the database:
 ```bash
+# Seeds demo accounts and generates a secure one-time password (or reads DEMO_USER_PASSWORD from .env):
 python manage.py seed_demo_users
+
+# Or specify a custom password directly:
+python manage.py seed_demo_users --password "YourSecurePass!123"
 ```
-*(The Login page at `http://localhost:5173/login` also includes 1-click quick-fill buttons for each demo role).*
+*(The Login page at `http://localhost:5173/login` provides 1-click quick-fill buttons for each demo role's email address).*
 
 ---
 

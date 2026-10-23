@@ -87,26 +87,29 @@ export default function Login() {
           <div className="grid grid-cols-3 gap-2">
             <button
               type="button"
-              onClick={() => setForm({ email: 'student@budgetbuddy.local', password: 'Student123!' })}
+              onClick={() => setForm((prev) => ({ ...prev, email: 'student@budgetbuddy.local' }))}
               className="rounded-lg border border-sky-200 bg-sky-50 px-2 py-1.5 text-xs font-medium text-sky-700 hover:bg-sky-100 transition text-center"
             >
               🎓 Student
             </button>
             <button
               type="button"
-              onClick={() => setForm({ email: 'premium@budgetbuddy.local', password: 'Premium123!' })}
+              onClick={() => setForm((prev) => ({ ...prev, email: 'premium@budgetbuddy.local' }))}
               className="rounded-lg border border-amber-200 bg-amber-50 px-2 py-1.5 text-xs font-medium text-amber-700 hover:bg-amber-100 transition text-center"
             >
               ⭐ Premium
             </button>
             <button
               type="button"
-              onClick={() => setForm({ email: 'admin@budgetbuddy.local', password: 'Admin123!' })}
+              onClick={() => setForm((prev) => ({ ...prev, email: 'admin@budgetbuddy.local' }))}
               className="rounded-lg border border-violet-200 bg-violet-50 px-2 py-1.5 text-xs font-medium text-violet-700 hover:bg-violet-100 transition text-center"
             >
               🛡️ Admin
             </button>
           </div>
+          <p className="mt-2 text-[11px] text-slate-400 text-center">
+            Populates demo account email; enter your password to sign in.
+          </p>
         </div>
 
         <p className="mt-5 text-center text-sm text-slate-600">

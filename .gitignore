@@ -34,10 +34,15 @@ ENV/
 env.bak/
 venv.bak/
 
-# Django / SQLite
+# Django & Databases
+*.sqlite
 *.sqlite3
 db.sqlite3
 db.sqlite3-journal
+*.db
+*.sql
+*.dump
+*.dump.gz
 media/
 staticfiles/
 
@@ -66,9 +71,32 @@ lerna-debug.log*
 # Environment & Secrets (Keep .env.example tracked)
 .env
 .env.*
+*.env
 !.env.example
 *.pem
 *.key
+*.pkcs12
+*.pfx
+*.p12
+*.crt
+*.cer
+*.der
+id_rsa
+id_rsa.pub
+id_ed25519
+id_ed25519.pub
+id_ecdsa
+id_ecdsa.pub
+id_dsa
+id_dsa.pub
+*secret*
+*credential*
+*.token
+*.auth
+*postman_environment.json
+secrets.json
+credentials.json
+client_secret*.json
 
 # IDE / Operating System
 .DS_Store

@@ -2,7 +2,7 @@
   "info": {
     "_postman_id": "budgetbuddy-milestone-1-auth",
     "name": "BudgetBuddy API - Milestone 1",
-    "description": "Postman collection for BudgetBuddy Milestone 1: Authentication, JWT Token Lifecycle, Role-Based Access Control, and Profile Management.",
+    "description": "Postman collection for BudgetBuddy Milestone 1: Authentication, JWT Token Lifecycle, Role-Based Access Control, and Profile Management. Configured with environment variables to prevent exposing credentials.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -18,6 +18,21 @@
     },
     {
       "key": "refreshToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "userPassword",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "currentPassword",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "newPassword",
       "value": "",
       "type": "string"
     }
@@ -38,7 +53,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"email\": \"newstudent@budgetbuddy.local\",\n  \"username\": \"newstudent\",\n  \"first_name\": \"New\",\n  \"password\": \"Str0ngPass!23\",\n  \"password_confirm\": \"Str0ngPass!23\"\n}"
+              "raw": "{\n  \"email\": \"newstudent@budgetbuddy.local\",\n  \"username\": \"newstudent\",\n  \"first_name\": \"New\",\n  \"password\": \"{{userPassword}}\",\n  \"password_confirm\": \"{{userPassword}}\"\n}"
             },
             "url": {
               "raw": "{{baseUrl}}/api/auth/register/",
@@ -74,7 +89,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"email\": \"student@budgetbuddy.local\",\n  \"password\": \"Student123!\"\n}"
+              "raw": "{\n  \"email\": \"student@budgetbuddy.local\",\n  \"password\": \"{{userPassword}}\"\n}"
             },
             "url": {
               "raw": "{{baseUrl}}/api/auth/login/",
@@ -110,7 +125,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"email\": \"admin@budgetbuddy.local\",\n  \"password\": \"Admin123!\"\n}"
+              "raw": "{\n  \"email\": \"admin@budgetbuddy.local\",\n  \"password\": \"{{userPassword}}\"\n}"
             },
             "url": {
               "raw": "{{baseUrl}}/api/auth/login/",
@@ -173,10 +188,10 @@
       ]
     },
     {
-      "name": "User Profile",
+      "name": "Profile & User Operations",
       "item": [
         {
-          "name": "Get Current User (Me)",
+          "name": "Get Current User Profile (/api/auth/me/)",
           "request": {
             "method": "GET",
             "header": [
@@ -233,7 +248,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"old_password\": \"Student123!\",\n  \"new_password\": \"NewSecurePass!456\",\n  \"new_password_confirm\": \"NewSecurePass!456\"\n}"
+              "raw": "{\n  \"current_password\": \"{{currentPassword}}\",\n  \"new_password\": \"{{newPassword}}\"\n}"
             },
             "url": {
               "raw": "{{baseUrl}}/api/auth/change-password/",
