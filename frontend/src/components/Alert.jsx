@@ -1,14 +1,18 @@
+import { AlertCircle, CheckCircle2 } from 'lucide-react'
+
 export default function Alert({ message, type = 'error' }) {
   if (!message) return null
 
-  const styles =
-    type === 'error'
-      ? 'bg-red-50 text-red-700 border-red-200'
-      : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+  const isError = type === 'error'
+  const Icon = isError ? AlertCircle : CheckCircle2
+  const styles = isError
+    ? 'border-danger/30 bg-danger-soft text-danger'
+    : 'border-accent/30 bg-accent-soft text-accent'
 
   return (
-    <div className={`rounded-lg border px-3 py-2 text-sm ${styles}`} role="alert">
-      {message}
+    <div className={`flex items-start gap-2.5 rounded-xl border px-3.5 py-2.5 text-sm ${styles}`} role="alert">
+      <Icon className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+      <span>{message}</span>
     </div>
   )
 }
