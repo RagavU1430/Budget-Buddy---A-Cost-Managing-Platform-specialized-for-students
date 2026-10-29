@@ -132,10 +132,10 @@ export default function Dashboard() {
           <SkeletonCard />
         ) : (
           <article
-            className={`glass rounded-[var(--radius-card)] p-5 animate-[rise_0.5s_cubic-bezier(0.22,1,0.36,1)_both]`}
+            className={`glass relative overflow-hidden rounded-[var(--radius-card)] p-5 animate-[rise_0.5s_cubic-bezier(0.22,1,0.36,1)_both] transition-transform duration-200 hover:-translate-y-0.5`}
             style={{ animationDelay: '210ms' }}
           >
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between mb-1">
               <p className="label">Budget Utilization</p>
               {budgetUtil >= 100 ? (
                 <span className="rounded-full bg-danger-soft px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-danger animate-[pulse-ring_1.6s_ease-in-out_infinite]">
