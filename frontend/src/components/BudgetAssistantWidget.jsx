@@ -4,12 +4,11 @@ import {
   CheckCircle2,
   GripVertical,
   Lock,
-  Maximize2,
-  Minimize2,
   Send,
   ShieldCheck,
   Sparkles,
   Trash2,
+  User,
   X,
   Zap,
 } from 'lucide-react'
@@ -24,9 +23,76 @@ const QUICK_PROMPTS = [
   'Give me student saving tips',
 ]
 
+const ACTION_LABELS = {
+  expense_created: {
+    label: 'Expense Logged Successfully',
+    bg: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30',
+  },
+  budget_created: {
+    label: 'Budget Limit Updated',
+    bg: 'bg-accent/15 text-accent border-accent/30',
+  },
+  income_created: {
+    label: 'Income Recorded',
+    bg: 'bg-cyan-500/15 text-cyan-400 border-cyan-500/30',
+  },
+}
+
 const cleanContent = (text) => {
   if (!text) return ''
   return text.replace(/\*\*([^*]+)\*\*/g, '$1').replace(/\*\*/g, '')
+}
+
+function FormattedMessage({ content }) {
+  const lines = cleanContent(content).split('\n')
+  return (
+    <div className="space-y-1.5 text-[13px] leading-relaxed">
+      {lines.map((line, idx) => {
+        const trimmed = line.trim()
+        if (!trimmed) {
+          return <div key={idx} className="h-1" />
+        }
+
+        // Bullet point
+        if (trimmed.startsWith('•') || trimmed.startsWith('-') || trimmed.startsWith('*')) {
+          const textWithoutBullet = trimmed.replace(/^[•\-*]\s*/, '')
+          const colonMatch = textWithoutBullet.match(/^([^:]+):(.*)$/)
+          if (colonMatch) {
+            return (
+              <div key={idx} className="flex items-start gap-2 text-fg/90">
+                <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-accent" />
+                <span>
+                  <strong className="font-semibold text-fg">{colonMatch[1]}:</strong>
+                  <span className="text-fg-muted">{colonMatch[2]}</span>
+                </span>
+              </div>
+            )
+          }
+          return (
+            <div key={idx} className="flex items-start gap-2 text-fg-muted">
+              <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-accent" />
+              <span>{textWithoutBullet}</span>
+            </div>
+          )
+        }
+
+        // Section header with emoji (e.g. "💡 Next Steps for You")
+        if (/^[\p{Emoji}\u200d\uFE0F]/u.test(trimmed) && trimmed.length < 50) {
+          return (
+            <div key={idx} className="font-semibold text-fg text-sm pt-1.5 pb-0.5 flex items-center gap-1.5 text-accent">
+              <span>{trimmed}</span>
+            </div>
+          )
+        }
+
+        return (
+          <p key={idx} className="text-fg/90">
+            {trimmed}
+          </p>
+        )
+      })}
+    </div>
+  )
 }
 
 export default function BudgetAssistantWidget() {
@@ -266,34 +332,38 @@ export default function BudgetAssistantWidget() {
       {/* Slide-out / floating chat drawer */}
       {isOpen && (
         <div
-          className={`fixed bottom-4 z-50 flex h-[620px] max-h-[90vh] w-full max-w-[430px] flex-col overflow-hidden rounded-3xl border border-line-strong bg-surface-2/95 shadow-2xl backdrop-blur-2xl animate-[rise_0.3s_cubic-bezier(0.22,1,0.36,1)_both] ${
+          className={`fixed bottom-4 z-50 flex h-[640px] max-h-[92vh] w-full max-w-[440px] flex-col overflow-hidden rounded-[2rem] border border-line-strong bg-[#090D1C]/95 shadow-[0_25px_60px_-15px_rgba(0,0,0,0.9)] ring-1 ring-white/10 backdrop-blur-2xl animate-[rise_0.3s_cubic-bezier(0.22,1,0.36,1)_both] ${
             position.x < (typeof window !== 'undefined' ? window.innerWidth / 2 : 500) ? 'left-4' : 'right-4'
           }`}
         >
           {/* Header */}
-          <div className="flex items-center justify-between border-b border-line bg-surface/80 px-4 py-3.5 backdrop-blur-md">
-            <div className="flex items-center gap-2.5">
-              <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-accent-soft text-accent ring-1 ring-accent/30 shadow-sm">
+          <div className="relative flex items-center justify-between border-b border-line-strong/60 bg-[#0E1428]/85 px-4.5 py-3.5 backdrop-blur-xl">
+            {/* Ambient accent glow in header */}
+            <div className="pointer-events-none absolute -left-6 -top-6 h-28 w-28 rounded-full bg-accent/20 blur-xl" />
+
+            <div className="relative flex items-center gap-3">
+              <div className="relative flex h-9 w-9 items-center justify-center rounded-2xl bg-gradient-to-br from-accent/25 to-teal-500/10 text-accent ring-1 ring-accent/30 shadow-sm">
                 <Bot className="h-5 w-5" />
-              </span>
+                <span className="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-emerald-400 ring-2 ring-[#0E1428]" />
+              </div>
               <div>
                 <div className="flex items-center gap-1.5">
-                  <h3 className="text-sm font-bold text-fg font-['Outfit']">BudgetBuddy AI</h3>
-                  <span className="flex items-center gap-1 rounded-full border border-accent/30 bg-accent-soft/30 px-1.5 py-0.5 text-[10px] font-medium text-accent">
+                  <h3 className="text-sm font-bold text-fg font-['Outfit'] tracking-tight">BudgetBuddy AI</h3>
+                  <span className="flex items-center gap-1 rounded-full border border-accent/30 bg-accent-soft/40 px-2 py-0.5 text-[10px] font-semibold text-accent">
                     <ShieldCheck className="h-3 w-3" />
                     Guardrailed
                   </span>
                 </div>
-                <p className="text-[11px] text-fg-muted">Student Financial Intelligence Agent</p>
+                <p className="text-[11px] text-fg-muted">Financial Intelligence Assistant</p>
               </div>
             </div>
 
-            <div className="flex items-center gap-1">
+            <div className="relative flex items-center gap-1">
               <button
                 type="button"
                 onClick={handleClear}
                 title="Reset conversation"
-                className="rounded-lg p-1.5 text-fg-faint hover:bg-white/5 hover:text-fg transition-colors"
+                className="flex h-8 w-8 items-center justify-center rounded-xl text-fg-faint hover:bg-white/5 hover:text-danger transition-colors cursor-pointer"
               >
                 <Trash2 className="h-4 w-4" />
               </button>
@@ -301,15 +371,15 @@ export default function BudgetAssistantWidget() {
                 type="button"
                 onClick={() => setIsOpen(false)}
                 title="Close chat"
-                className="rounded-lg p-1.5 text-fg-faint hover:bg-white/5 hover:text-fg transition-colors"
+                className="flex h-8 w-8 items-center justify-center rounded-xl text-fg-faint hover:bg-white/5 hover:text-fg transition-colors cursor-pointer"
               >
-                <X className="h-4.5 w-4.5" />
+                <X className="h-4 w-4" />
               </button>
             </div>
           </div>
 
-          {/* Quick prompts scroller */}
-          <div className="border-b border-line/60 bg-surface/40 px-3 py-2 overflow-x-auto scrollbar-none flex items-center gap-2 shrink-0">
+          {/* Quick prompts scroller — Hidden scrollbars for clean look */}
+          <div className="border-b border-line/60 bg-[#0A0E20]/70 px-3.5 py-2.5 flex items-center gap-2 shrink-0 overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             <span className="text-[10px] uppercase font-bold text-fg-faint tracking-wider shrink-0 flex items-center gap-1">
               <Zap className="h-3 w-3 text-accent" />
               Ask:
@@ -319,31 +389,38 @@ export default function BudgetAssistantWidget() {
                 key={idx}
                 type="button"
                 onClick={() => handleSend(prompt)}
-                className="shrink-0 rounded-full border border-line bg-white/4 px-2.5 py-1 text-[11px] font-medium text-fg-muted hover:border-accent/40 hover:bg-accent-soft/20 hover:text-fg transition-all cursor-pointer"
+                className="shrink-0 rounded-full border border-line bg-white/4 px-3 py-1 text-[11px] font-medium text-fg-muted hover:border-accent/50 hover:bg-accent-soft/20 hover:text-fg hover:scale-[1.02] transition-all cursor-pointer select-none"
               >
                 {prompt}
               </button>
             ))}
           </div>
 
-          {/* Messages list */}
-          <div className="flex-1 overflow-y-auto p-4 space-y-3.5 text-sm">
+          {/* Messages list — Modern slim custom scrollbar */}
+          <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4 text-sm [scrollbar-width:thin] [scrollbar-color:rgba(148,163,184,0.2)_transparent] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-white/10 [&::-webkit-scrollbar-thumb]:rounded-full hover:[&::-webkit-scrollbar-thumb]:bg-white/20">
             {messages.map((m) => {
               const isUser = m.role === 'user'
               const isGuardrail = m.guardrail_triggered || m.action_type === 'guardrail_blocked'
+              const actionMeta = ACTION_LABELS[m.action_type]
 
               return (
                 <div
                   key={m.id}
-                  className={`flex flex-col ${isUser ? 'items-end' : 'items-start'}`}
+                  className={`flex ${isUser ? 'justify-end' : 'justify-start items-start gap-2.5'}`}
                 >
+                  {!isUser && (
+                    <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-accent/20 to-teal-500/20 text-accent ring-1 ring-accent/30 shadow-sm mt-0.5">
+                      <Sparkles className="h-3.5 w-3.5" />
+                    </div>
+                  )}
+
                   <div
-                    className={`max-w-[88%] rounded-2xl px-3.5 py-2.5 text-[13px] leading-relaxed shadow-sm ${
+                    className={`max-w-[85%] rounded-2xl p-3.5 text-[13px] leading-relaxed shadow-sm transition-all ${
                       isUser
-                        ? 'bg-accent text-on-accent font-medium rounded-tr-sm'
+                        ? 'rounded-tr-sm bg-gradient-to-r from-emerald-500 to-teal-600 text-white font-medium shadow-[0_4px_16px_rgba(16,185,129,0.25)]'
                         : isGuardrail
-                          ? 'border border-danger/40 bg-danger-soft text-fg rounded-tl-sm'
-                          : 'border border-line bg-surface text-fg rounded-tl-sm'
+                          ? 'rounded-tl-sm border border-danger/40 bg-danger-soft/90 text-fg'
+                          : 'rounded-tl-sm border border-line-strong/60 bg-[#0E1428]/90 text-fg shadow-[0_4px_20px_rgba(0,0,0,0.3)] backdrop-blur-md'
                     }`}
                   >
                     {isGuardrail && (
@@ -352,12 +429,20 @@ export default function BudgetAssistantWidget() {
                         <span>Security Guardrail</span>
                       </div>
                     )}
-                    <div className="whitespace-pre-wrap">{cleanContent(m.content)}</div>
 
-                    {m.action_type && m.action_type !== 'guardrail_blocked' && (
-                      <div className="mt-2 inline-flex items-center gap-1 rounded border border-accent/30 bg-accent-soft/30 px-2 py-0.5 text-[10px] font-semibold text-accent">
+                    {isUser ? (
+                      <div className="whitespace-pre-wrap">{m.content}</div>
+                    ) : (
+                      <FormattedMessage content={m.content} />
+                    )}
+
+                    {/* Only show real action executions like expense_created, budget_created, income_created */}
+                    {actionMeta && (
+                      <div
+                        className={`mt-2.5 inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[11px] font-semibold ${actionMeta.bg}`}
+                      >
                         <CheckCircle2 className="h-3 w-3" />
-                        <span>Action Executed ({m.action_type})</span>
+                        <span>{actionMeta.label}</span>
                       </div>
                     )}
                   </div>
@@ -366,12 +451,16 @@ export default function BudgetAssistantWidget() {
             })}
 
             {loading && (
-              <div className="flex items-start gap-2">
-                <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-xl bg-accent-soft text-accent">
+              <div className="flex items-start gap-2.5">
+                <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-xl bg-accent-soft text-accent ring-1 ring-accent/30 shadow-sm">
                   <Bot className="h-4 w-4" />
                 </div>
-                <div className="rounded-2xl border border-line bg-surface px-4 py-2.5 text-xs text-fg-muted flex items-center gap-1.5">
-                  <span className="h-2 w-2 rounded-full bg-accent animate-ping" />
+                <div className="rounded-2xl rounded-tl-sm border border-line-strong/60 bg-[#0E1428]/90 px-4 py-2.5 text-xs text-fg-muted flex items-center gap-2 shadow-sm">
+                  <span className="flex gap-1">
+                    <span className="h-1.5 w-1.5 rounded-full bg-accent animate-bounce" style={{ animationDelay: '0ms' }} />
+                    <span className="h-1.5 w-1.5 rounded-full bg-accent animate-bounce" style={{ animationDelay: '150ms' }} />
+                    <span className="h-1.5 w-1.5 rounded-full bg-accent animate-bounce" style={{ animationDelay: '300ms' }} />
+                  </span>
                   <span>BudgetBuddy is calculating…</span>
                 </div>
               </div>
@@ -380,7 +469,7 @@ export default function BudgetAssistantWidget() {
           </div>
 
           {/* Input footer */}
-          <div className="border-t border-line bg-surface/80 p-3 backdrop-blur-md">
+          <div className="border-t border-line-strong/60 bg-[#0E1428]/90 p-3.5 backdrop-blur-xl">
             <form
               onSubmit={(e) => {
                 e.preventDefault()
@@ -388,27 +477,29 @@ export default function BudgetAssistantWidget() {
               }}
               className="flex items-center gap-2"
             >
-              <input
-                ref={inputRef}
-                type="text"
-                placeholder="Ask about your budget or type 'Spent 200 on books'..."
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                disabled={loading}
-                className="flex-1 rounded-xl border border-line bg-surface-2 px-3.5 py-2.5 text-xs text-fg placeholder:text-fg-faint outline-none transition-all focus:border-accent focus:ring-1 focus:ring-accent/30"
-              />
+              <div className="relative flex-1 flex items-center rounded-2xl border border-line-strong bg-white/4 px-3.5 py-2.5 transition-all focus-within:border-accent focus-within:ring-2 focus-within:ring-accent/20">
+                <input
+                  ref={inputRef}
+                  type="text"
+                  placeholder="Ask anything or type 'Spent 150 on food'..."
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  disabled={loading}
+                  className="w-full bg-transparent text-xs text-fg placeholder:text-fg-faint outline-none"
+                />
+              </div>
               <button
                 type="submit"
                 disabled={!input.trim() || loading}
-                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-accent text-on-accent transition-all hover:bg-accent-hover hover:shadow-glow disabled:opacity-40 cursor-pointer"
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow-[0_0_15px_rgba(16,185,129,0.3)] transition-all hover:scale-105 active:scale-95 disabled:opacity-40 disabled:hover:scale-100 cursor-pointer"
                 aria-label="Send message"
               >
                 <Send className="h-4 w-4" />
               </button>
             </form>
-            <div className="mt-2 text-center text-[10px] text-fg-faint flex items-center justify-center gap-1">
+            <div className="mt-2 text-center text-[10px] text-fg-faint flex items-center justify-center gap-1.5">
               <Lock className="h-2.5 w-2.5 text-accent" />
-              <span>Private & confidential. Passwords and session keys are never revealed.</span>
+              <span>Grounded in your budget data · Private & confidential</span>
             </div>
           </div>
         </div>
