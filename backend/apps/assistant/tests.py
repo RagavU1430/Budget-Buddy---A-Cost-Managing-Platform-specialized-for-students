@@ -5,7 +5,7 @@ from rest_framework import status
 from rest_framework.test import APITestCase
 
 from apps.budgets.models import Budget
-from apps.expenses.models import Expense
+from apps.expenses.models import Expense, Income
 from .guardrails import evaluate_input_guardrail, sanitize_output
 
 User = get_user_model()
@@ -102,6 +102,50 @@ class AssistantAPITests(APITestCase):
         budget = Budget.objects.filter(user=self.user).first()
         self.assertIsNotNone(budget)
         self.assertEqual(budget.limit_amount, Decimal(days_in_month * 1000))
+
+    def test_chat_asks_category_clarification_for_unspecified_expense(self):
+        # 1. User says "spent 450" without specifying category
+        res = self.client.post(self.chat_url, {"message": "spent 450"})
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.assertEqual(res.data["action_type"], "pending_category_clarification")
+        self.assertIn("Under what category", res.data["reply"])
+        self.assertIn("Food & Dining", res.data["action_data"]["options"][0])
+
+        # 2. User replies with category "Food"
+        followup = self.client.post(self.chat_url, {"message": "Food & Dining"})
+        self.assertEqual(followup.status_code, status.HTTP_200_OK)
+        self.assertEqual(followup.data["action_type"], "expense_created")
+        expense = Expense.objects.filter(user=self.user).first()
+        self.assertIsNotNone(expense)
+        self.assertEqual(expense.amount, Decimal("450"))
+        self.assertEqual(expense.category, Expense.Category.FOOD)
+
+    def test_chat_asks_source_clarification_for_new_money(self):
+        # 1. User says "I got new money of 2500"
+        res = self.client.post(self.chat_url, {"message": "I got new money of 2500"})
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.assertEqual(res.data["action_type"], "pending_category_clarification")
+        self.assertIn("category or source", res.data["reply"])
+        self.assertIn("Freelance", res.data["action_data"]["options"][2])
+
+        # 2. User replies with source "Freelance"
+        followup = self.client.post(self.chat_url, {"message": "Freelance"})
+        self.assertEqual(followup.status_code, status.HTTP_200_OK)
+        self.assertEqual(followup.data["action_type"], "income_created")
+        income = Income.objects.filter(user=self.user).first()
+        self.assertIsNotNone(income)
+        self.assertEqual(income.amount, Decimal("2500"))
+        self.assertEqual(income.source_type, Income.SourceType.FREELANCE)
+
+    def test_chat_pending_action_cancellation(self):
+        # 1. Ask to log spend
+        self.client.post(self.chat_url, {"message": "spent 300"})
+        # 2. User cancels
+        res = self.client.post(self.chat_url, {"message": "cancel"})
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.assertEqual(res.data["action_type"], "pending_cancelled")
+        # Ensure no expense was created
+        self.assertEqual(Expense.objects.filter(user=self.user, amount=Decimal("300")).count(), 0)
 
     def test_assistant_summary_endpoint(self):
         res = self.client.get(self.summary_url)

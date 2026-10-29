@@ -5,7 +5,6 @@ import {
   GripVertical,
   Lock,
   Send,
-  ShieldCheck,
   Sparkles,
   Trash2,
   User,
@@ -35,6 +34,10 @@ const ACTION_LABELS = {
   income_created: {
     label: 'Income Recorded',
     bg: 'bg-cyan-500/15 text-cyan-400 border-cyan-500/30',
+  },
+  pending_category_clarification: {
+    label: 'Choose a Category / Source below',
+    bg: 'bg-amber-500/15 text-amber-400 border-amber-500/30',
   },
 }
 
@@ -357,10 +360,6 @@ export default function BudgetAssistantWidget() {
               <div>
                 <div className="flex items-center gap-1.5">
                   <h3 className="text-sm font-bold text-fg font-['Outfit'] tracking-tight">BudgetBuddy AI</h3>
-                  <span className="flex items-center gap-1 rounded-full border border-accent/30 bg-accent-soft/40 px-2 py-0.5 text-[10px] font-semibold text-accent">
-                    <ShieldCheck className="h-3 w-3" />
-                    Guardrailed
-                  </span>
                 </div>
                 <p className="text-[11px] text-fg-muted">Financial Intelligence Assistant</p>
               </div>
@@ -442,6 +441,22 @@ export default function BudgetAssistantWidget() {
                       <div className="whitespace-pre-wrap">{m.content}</div>
                     ) : (
                       <FormattedMessage content={m.content} />
+                    )}
+
+                    {/* Interactive category / source selection pills for pending clarification */}
+                    {!isUser && m.action_type === 'pending_category_clarification' && m.action_data?.options && (
+                      <div className="mt-3 flex flex-wrap gap-1.5 pt-2.5 border-t border-line-strong/40">
+                        {m.action_data.options.map((opt) => (
+                          <button
+                            key={opt}
+                            type="button"
+                            onClick={() => handleSend(opt)}
+                            className="cursor-pointer rounded-full border border-accent/40 bg-accent/10 px-3 py-1.5 text-xs font-semibold text-accent hover:border-accent hover:bg-accent hover:text-on-accent transition-all duration-150 active:scale-95 shadow-sm select-none"
+                          >
+                            {opt}
+                          </button>
+                        ))}
+                      </div>
                     )}
 
                     {/* Only show real action executions like expense_created, budget_created, income_created */}

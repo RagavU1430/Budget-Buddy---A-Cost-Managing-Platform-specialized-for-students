@@ -20,25 +20,75 @@ from django.utils import timezone
 from apps.budgets.models import Budget
 from apps.expenses.models import Expense, Income
 from .guardrails import sanitize_output
+from .models import ChatMessage
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 
+EXPENSE_CATEGORY_OPTIONS = [
+    "🍔 Food & Dining",
+    "🚌 Travel & Commute",
+    "🛍️ Shopping",
+    "📚 Education & Books",
+    "🎬 Entertainment",
+    "📦 Miscellaneous",
+]
+
+INCOME_SOURCE_OPTIONS = [
+    "💵 Pocket Money / Allowance",
+    "💼 Part-time Job / Salary",
+    "💻 Freelance",
+    "🎓 Scholarship",
+    "🎁 Gift",
+    "💰 Other",
+]
+
 CATEGORY_KEYWORDS = {
-    Expense.Category.FOOD: ["food", "lunch", "dinner", "breakfast", "canteen", "cafe", "snack", "coffee", "tea", "swiggy", "zomato", "groceries", "mess"],
-    Expense.Category.TRAVEL: ["travel", "bus", "metro", "auto", "train", "flight", "cab", "uber", "ola", "petrol", "fuel", "ticket"],
-    Expense.Category.SHOPPING: ["shopping", "clothes", "shoes", "amazon", "flipkart", "dress", "gadget", "watch"],
-    Expense.Category.EDUCATION: ["education", "book", "books", "course", "stationery", "exam", "college", "fees", "tuition", "xerox", "print"],
+    Expense.Category.FOOD: ["food", "lunch", "dinner", "breakfast", "canteen", "cafe", "snack", "coffee", "tea", "swiggy", "zomato", "groceries", "mess", "dining", "eat"],
+    Expense.Category.TRAVEL: ["travel", "bus", "metro", "auto", "train", "flight", "cab", "uber", "ola", "petrol", "fuel", "ticket", "commute", "transport"],
+    Expense.Category.SHOPPING: ["shopping", "clothes", "shoes", "amazon", "flipkart", "dress", "gadget", "watch", "bought"],
+    Expense.Category.EDUCATION: ["education", "book", "books", "course", "stationery", "exam", "college", "fees", "tuition", "xerox", "print", "study"],
     Expense.Category.ENTERTAINMENT: ["entertainment", "movie", "cinema", "game", "netflix", "party", "outing", "concert", "hotstar"],
-    Expense.Category.MISC: ["misc", "recharge", "mobile", "wifi", "bill", "laundry", "medical", "medicine"],
+    Expense.Category.MISC: ["misc", "recharge", "mobile", "wifi", "bill", "laundry", "medical", "medicine", "other"],
 }
 
 INCOME_SOURCE_KEYWORDS = {
-    Income.SourceType.POCKET_MONEY: ["pocket money", "allowance", "parents", "home"],
-    Income.SourceType.SCHOLARSHIP: ["scholarship", "grant", "fellowship"],
-    Income.SourceType.FREELANCE: ["freelance", "project", "gig", "client"],
-    Income.SourceType.PART_TIME: ["part-time", "job", "salary", "internship", "stipend"],
-    Income.SourceType.GIFT: ["gift", "birthday"],
+    Income.SourceType.POCKET_MONEY: ["pocket money", "allowance", "parents", "home", "family", "mom", "dad"],
+    Income.SourceType.SCHOLARSHIP: ["scholarship", "grant", "fellowship", "stipend grant"],
+    Income.SourceType.FREELANCE: ["freelance", "project", "gig", "client", "contract", "freelancing"],
+    Income.SourceType.PART_TIME: ["part-time", "job", "salary", "internship", "stipend", "part time"],
+    Income.SourceType.GIFT: ["gift", "birthday", "celebration", "present"],
 }
+
+
+def get_pending_action(user) -> Optional[Dict[str, Any]]:
+    """Retrieves any active multi-turn pending action for the user."""
+    profile = getattr(user, "profile", None)
+    if profile and isinstance(profile.financial_preferences, dict):
+        pending = profile.financial_preferences.get("pending_assistant_action")
+        if pending:
+            return pending
+    last_bot_msg = ChatMessage.objects.filter(user=user, role=ChatMessage.Role.ASSISTANT).order_by("-created_at").first()
+    if last_bot_msg and last_bot_msg.action_type == "pending_category_clarification":
+        return last_bot_msg.action_data
+    return None
+
+
+def set_pending_action(user, data: Dict[str, Any]):
+    """Stores pending multi-turn action in user preferences."""
+    profile = getattr(user, "profile", None)
+    if profile:
+        if not isinstance(profile.financial_preferences, dict):
+            profile.financial_preferences = {}
+        profile.financial_preferences["pending_assistant_action"] = data
+        profile.save(update_fields=["financial_preferences"])
+
+
+def clear_pending_action(user):
+    """Clears any pending multi-turn action."""
+    profile = getattr(user, "profile", None)
+    if profile and isinstance(profile.financial_preferences, dict) and "pending_assistant_action" in profile.financial_preferences:
+        del profile.financial_preferences["pending_assistant_action"]
+        profile.save(update_fields=["financial_preferences"])
 
 
 def strip_markdown_stars(text: str) -> str:
@@ -206,6 +256,188 @@ def call_gemini_api(user, query: str, context: Dict[str, Any]) -> Optional[str]:
     return None
 
 
+def handle_pending_action(user, query: str, pending: Dict[str, Any]) -> Optional[Tuple[str, str, Dict[str, Any]]]:
+    """Resolves a pending multi-turn clarification (e.g. user specifying category or source)."""
+    q = query.strip()
+    q_lower = q.lower()
+    cleaned_q = re.sub(r"[^\w\s]", " ", q_lower)
+
+    # 1. Cancellation check
+    if any(q_lower.startswith(w) for w in ["cancel", "stop", "nevermind", "forget it", "no thanks", "abort", "exit"]):
+        clear_pending_action(user)
+        return (
+            "pending_cancelled",
+            "❌ Action Cancelled. I did not log that transaction. How else can I help you?",
+            {},
+        )
+
+    # 2. If it's a completely distinct question or budget command, cancel pending and fall through
+    if any(q_lower.startswith(w) for w in ["how", "what", "can you", "is there", "show", "check", "set budget", "set a budget"]) or "?" in q:
+        clear_pending_action(user)
+        return None
+
+    curr_date = timezone.now().date()
+    flow = pending.get("flow")
+
+    if flow == "expense":
+        matched_cat = None
+        for cat, keywords in CATEGORY_KEYWORDS.items():
+            if any(kw in cleaned_q for kw in keywords):
+                matched_cat = cat
+                break
+
+        if not matched_cat:
+            if "food" in cleaned_q or "dining" in cleaned_q:
+                matched_cat = Expense.Category.FOOD
+            elif "travel" in cleaned_q or "commute" in cleaned_q:
+                matched_cat = Expense.Category.TRAVEL
+            elif "shopping" in cleaned_q:
+                matched_cat = Expense.Category.SHOPPING
+            elif "education" in cleaned_q or "book" in cleaned_q or "study" in cleaned_q:
+                matched_cat = Expense.Category.EDUCATION
+            elif "entertainment" in cleaned_q or "movie" in cleaned_q:
+                matched_cat = Expense.Category.ENTERTAINMENT
+            elif "misc" in cleaned_q or "other" in cleaned_q:
+                matched_cat = Expense.Category.MISC
+
+        amount = None
+        if pending.get("amount"):
+            amount = Decimal(str(pending["amount"]))
+        else:
+            amount_match = re.search(r"(?:₹|rs\.?|inr)?\s*(\d+(?:,\d+)*(?:\.\d{1,2})?)", q_lower)
+            if amount_match:
+                amount = Decimal(amount_match.group(1).replace(",", ""))
+
+        if not matched_cat and not amount:
+            return None
+
+        if matched_cat and not amount:
+            pending["category"] = matched_cat
+            set_pending_action(user, pending)
+            return (
+                "pending_category_clarification",
+                f"Got it, {matched_cat.capitalize()}! How much was spent? (e.g. '150')",
+                {"flow": "expense", "amount": None, "category": matched_cat},
+            )
+
+        if not matched_cat and amount:
+            pending["amount"] = str(amount)
+            set_pending_action(user, pending)
+            return (
+                "pending_category_clarification",
+                f"Under what category does this spend of ₹{amount:,.2f} come?\n\n"
+                f"• 🍔 Food & Dining\n• 🚌 Travel & Commute\n• 🛍️ Shopping\n• 📚 Education & Books\n• 🎬 Entertainment\n• 📦 Miscellaneous",
+                {"flow": "expense", "amount": str(amount), "options": EXPENSE_CATEGORY_OPTIONS},
+            )
+
+        if not matched_cat:
+            matched_cat = Expense.Category.MISC
+
+        title = pending.get("title") or f"{matched_cat.capitalize()} Expense"
+        if title in ["Spend", "Expense"]:
+            title = f"{matched_cat.capitalize()} Expense"
+
+        expense = Expense.objects.create(
+            user=user,
+            title=title[:100],
+            amount=amount,
+            category=matched_cat,
+            date=curr_date,
+            payment_method=Expense.PaymentMethod.UPI,
+            notes="Logged via BudgetBuddy AI Assistant",
+        )
+        clear_pending_action(user)
+
+        res = (
+            f"✅ Expense Logged Successfully!\n\n"
+            f"• Title: {expense.title}\n"
+            f"• Amount: ₹{expense.amount:,.2f}\n"
+            f"• Category: {expense.get_category_display()}\n"
+            f"• Date: {expense.date.strftime('%d %b %Y')}\n\n"
+            f"Your monthly totals and budget gauges have been updated automatically."
+        )
+        return ("expense_created", res, {"id": expense.id, "amount": str(expense.amount), "category": expense.category})
+
+    if flow == "income":
+        matched_source = None
+        for source, keywords in INCOME_SOURCE_KEYWORDS.items():
+            if any(kw in cleaned_q for kw in keywords):
+                matched_source = source
+                break
+
+        if not matched_source:
+            if "pocket" in cleaned_q or "allowance" in cleaned_q:
+                matched_source = Income.SourceType.POCKET_MONEY
+            elif "part" in cleaned_q or "job" in cleaned_q or "salary" in cleaned_q or "stipend" in cleaned_q:
+                matched_source = Income.SourceType.PART_TIME
+            elif "freelance" in cleaned_q or "gig" in cleaned_q:
+                matched_source = Income.SourceType.FREELANCE
+            elif "scholarship" in cleaned_q or "grant" in cleaned_q:
+                matched_source = Income.SourceType.SCHOLARSHIP
+            elif "gift" in cleaned_q or "birthday" in cleaned_q:
+                matched_source = Income.SourceType.GIFT
+            elif "other" in cleaned_q:
+                matched_source = Income.SourceType.OTHER
+
+        amount = None
+        if pending.get("amount"):
+            amount = Decimal(str(pending["amount"]))
+        else:
+            amount_match = re.search(r"(?:₹|rs\.?|inr)?\s*(\d+(?:,\d+)*(?:\.\d{1,2})?)", q_lower)
+            if amount_match:
+                amount = Decimal(amount_match.group(1).replace(",", ""))
+
+        if not matched_source and not amount:
+            return None
+
+        if matched_source and not amount:
+            pending["source_type"] = matched_source
+            set_pending_action(user, pending)
+            return (
+                "pending_category_clarification",
+                f"Great! How much {matched_source.replace('_', ' ').capitalize()} income did you receive?",
+                {"flow": "income", "amount": None, "source_type": matched_source},
+            )
+
+        if not matched_source and amount:
+            pending["amount"] = str(amount)
+            set_pending_action(user, pending)
+            return (
+                "pending_category_clarification",
+                f"Awesome! Under what category or source does this new money of ₹{amount:,.2f} come?\n\n"
+                f"• 💵 Pocket Money / Allowance\n• 💼 Part-time Job / Salary\n• 💻 Freelance\n• 🎓 Scholarship\n• 🎁 Gift\n• 💰 Other",
+                {"flow": "income", "amount": str(amount), "options": INCOME_SOURCE_OPTIONS},
+            )
+
+        if not matched_source:
+            matched_source = Income.SourceType.OTHER
+
+        title = pending.get("title") or f"{matched_source.replace('_', ' ').capitalize()}"
+        if title in ["Income", "New Money"]:
+            title = f"{matched_source.replace('_', ' ').capitalize()}"
+
+        income = Income.objects.create(
+            user=user,
+            title=title[:120],
+            amount=amount,
+            source_type=matched_source,
+            date=curr_date,
+            notes="Logged via BudgetBuddy AI Assistant",
+        )
+        clear_pending_action(user)
+
+        res = (
+            f"💰 Income Recorded!\n\n"
+            f"• Source: {income.get_source_type_display()}\n"
+            f"• Amount: ₹{income.amount:,.2f}\n"
+            f"• Date: {income.date.strftime('%d %b %Y')}\n\n"
+            f"Your net balance has been updated."
+        )
+        return ("income_created", res, {"id": income.id, "amount": str(income.amount), "source_type": income.source_type})
+
+    return None
+
+
 def try_action_dispatch(user, query: str) -> Optional[Tuple[str, str, Dict[str, Any]]]:
     """Parses actionable commands (logging an expense, setting a budget, recording income)."""
     q = query.strip()
@@ -214,19 +446,22 @@ def try_action_dispatch(user, query: str) -> Optional[Tuple[str, str, Dict[str, 
     month_first = date(curr_date.year, curr_date.month, 1)
 
     # 1. Action: Log Expense
-    expense_triggers = ["log expense", "add expense", "spent", "paid", "bought", "spend"]
+    expense_triggers = ["log expense", "add expense", "spent", "paid", "bought", "spend", "purchase", "cost"]
     is_expense_action = any(trigger in q_lower for trigger in expense_triggers)
 
-    if is_expense_action and not ("how much" in q_lower or "what did i" in q_lower or "budget" in q_lower and "set" in q_lower):
-        amount_match = re.search(r"(?:₹|rs\.?|inr)?\s*(\d+(?:\.\d{1,2})?)", q_lower)
-        if amount_match:
-            amount = Decimal(amount_match.group(1))
-            matched_cat = Expense.Category.MISC
-            for cat, keywords in CATEGORY_KEYWORDS.items():
-                if any(kw in q_lower for kw in keywords):
-                    matched_cat = cat
-                    break
+    if is_expense_action and not ("how much" in q_lower or "what did i" in q_lower or "budget" in q_lower and "set" in q_lower or "?" in q_lower):
+        amount_match = re.search(r"(?:₹|rs\.?|inr)?\s*(\d+(?:,\d+)*(?:\.\d{1,2})?)", q_lower)
+        amount = Decimal(amount_match.group(1).replace(",", "")) if amount_match else None
 
+        # Check explicit category keywords
+        matched_cat = None
+        for cat, keywords in CATEGORY_KEYWORDS.items():
+            if any(kw in q_lower for kw in keywords):
+                matched_cat = cat
+                break
+
+        # If user explicitly provided category and amount, log it immediately
+        if matched_cat and amount:
             title = q
             for prefix in ["log expense", "add expense", "spent", "paid"]:
                 if q_lower.startswith(prefix):
@@ -245,6 +480,7 @@ def try_action_dispatch(user, query: str) -> Optional[Tuple[str, str, Dict[str, 
                 payment_method=Expense.PaymentMethod.UPI,
                 notes="Logged via BudgetBuddy AI Assistant",
             )
+            clear_pending_action(user)
 
             res = (
                 f"✅ Expense Logged Successfully!\n\n"
@@ -255,6 +491,59 @@ def try_action_dispatch(user, query: str) -> Optional[Tuple[str, str, Dict[str, 
                 f"Your monthly totals and budget gauges have been updated automatically."
             )
             return ("expense_created", res, {"id": expense.id, "amount": str(expense.amount), "category": expense.category})
+
+        # Category is NOT specified! Ask the student clarifying question
+        if amount:
+            set_pending_action(user, {
+                "flow": "expense",
+                "amount": str(amount),
+                "title": "Expense",
+                "options": EXPENSE_CATEGORY_OPTIONS,
+            })
+            res = (
+                f"Got it! Under what category does this spend of ₹{amount:,.2f} come?\n\n"
+                f"Please choose one of the categories below:\n"
+                f"• 🍔 Food & Dining (canteen, mess, groceries)\n"
+                f"• 🚌 Travel & Commute (bus, metro, cab, fuel)\n"
+                f"• 🛍️ Shopping (clothes, gadgets, essentials)\n"
+                f"• 📚 Education & Books (notes, courses, stationery)\n"
+                f"• 🎬 Entertainment (movies, games, outings)\n"
+                f"• 📦 Miscellaneous (recharge, bills, other)"
+            )
+            return (
+                "pending_category_clarification",
+                res,
+                {
+                    "flow": "expense",
+                    "amount": str(amount),
+                    "options": EXPENSE_CATEGORY_OPTIONS,
+                },
+            )
+        else:
+            set_pending_action(user, {
+                "flow": "expense",
+                "amount": None,
+                "title": "Expense",
+                "options": EXPENSE_CATEGORY_OPTIONS,
+            })
+            res = (
+                f"Sure! How much did you spend, and under what category does this spend come?\n\n"
+                f"• 🍔 Food & Dining\n"
+                f"• 🚌 Travel & Commute\n"
+                f"• 🛍️ Shopping\n"
+                f"• 📚 Education & Books\n"
+                f"• 🎬 Entertainment\n"
+                f"• 📦 Miscellaneous"
+            )
+            return (
+                "pending_category_clarification",
+                res,
+                {
+                    "flow": "expense",
+                    "amount": None,
+                    "options": EXPENSE_CATEGORY_OPTIONS,
+                },
+            )
 
     # 2. Action: Set Budget Limit
     is_budget_question = (
@@ -339,17 +628,25 @@ def try_action_dispatch(user, query: str) -> Optional[Tuple[str, str, Dict[str, 
                 },
             )
 
-    # 3. Action: Record Income
-    if "income" in q_lower or "received" in q_lower or "got" in q_lower and ("money" in q_lower or "stipend" in q_lower):
-        amount_match = re.search(r"(?:₹|rs\.?|inr)?\s*(\d+(?:\.\d{1,2})?)", q_lower)
-        if amount_match and ("add" in q_lower or "record" in q_lower or "got" in q_lower or "received" in q_lower):
-            amount = Decimal(amount_match.group(1))
-            matched_source = Income.SourceType.POCKET_MONEY
-            for source, keywords in INCOME_SOURCE_KEYWORDS.items():
-                if any(kw in q_lower for kw in keywords):
-                    matched_source = source
-                    break
+    # 3. Action: Record Income / New Money
+    income_triggers = ["income", "received", "got money", "new money", "add money", "add income", "record income", "got cash", "cash received"]
+    is_income_action = any(t in q_lower for t in income_triggers) or (
+        ("got" in q_lower or "received" in q_lower) and any(k in q_lower for k in ["money", "cash", "stipend", "allowance", "rupees", "rs", "₹", "inr"])
+    )
 
+    if is_income_action and not ("how much" in q_lower or "what did i" in q_lower or "?" in q_lower):
+        amount_match = re.search(r"(?:₹|rs\.?|inr)?\s*(\d+(?:,\d+)*(?:\.\d{1,2})?)", q_lower)
+        amount = Decimal(amount_match.group(1).replace(",", "")) if amount_match else None
+
+        # Check explicit source keywords
+        matched_source = None
+        for source, keywords in INCOME_SOURCE_KEYWORDS.items():
+            if any(kw in q_lower for kw in keywords):
+                matched_source = source
+                break
+
+        # If user explicitly specified the source and the amount, log it immediately
+        if matched_source and amount:
             income = Income.objects.create(
                 user=user,
                 title=f"{matched_source.replace('_', ' ').capitalize()}",
@@ -358,7 +655,7 @@ def try_action_dispatch(user, query: str) -> Optional[Tuple[str, str, Dict[str, 
                 date=curr_date,
                 notes="Logged via BudgetBuddy AI Assistant",
             )
-
+            clear_pending_action(user)
             res = (
                 f"💰 Income Recorded!\n\n"
                 f"• Source: {income.get_source_type_display()}\n"
@@ -366,7 +663,60 @@ def try_action_dispatch(user, query: str) -> Optional[Tuple[str, str, Dict[str, 
                 f"• Date: {income.date.strftime('%d %b %Y')}\n\n"
                 f"Your net balance has been updated."
             )
-            return ("income_created", res, {"id": income.id, "amount": str(income.amount)})
+            return ("income_created", res, {"id": income.id, "amount": str(income.amount), "source_type": income.source_type})
+
+        # Source is NOT specified! Ask the student clarifying questions
+        if amount:
+            set_pending_action(user, {
+                "flow": "income",
+                "amount": str(amount),
+                "title": "Income",
+                "options": INCOME_SOURCE_OPTIONS,
+            })
+            res = (
+                f"Awesome! Under what category or source does this new money of ₹{amount:,.2f} come?\n\n"
+                f"Please choose one of the options below:\n"
+                f"• 💵 Pocket Money / Allowance (from parents or family)\n"
+                f"• 💼 Part-time Job / Salary / Stipend\n"
+                f"• 💻 Freelance / Project Gigs\n"
+                f"• 🎓 Scholarship / Grant\n"
+                f"• 🎁 Gift (birthday, celebration)\n"
+                f"• 💰 Other Sources"
+            )
+            return (
+                "pending_category_clarification",
+                res,
+                {
+                    "flow": "income",
+                    "amount": str(amount),
+                    "options": INCOME_SOURCE_OPTIONS,
+                },
+            )
+        else:
+            set_pending_action(user, {
+                "flow": "income",
+                "amount": None,
+                "title": "Income",
+                "options": INCOME_SOURCE_OPTIONS,
+            })
+            res = (
+                f"Great! How much new money or income did you receive, and under what category or source does it come?\n\n"
+                f"• 💵 Pocket Money / Allowance\n"
+                f"• 💼 Part-time Job / Salary\n"
+                f"• 💻 Freelance\n"
+                f"• 🎓 Scholarship\n"
+                f"• 🎁 Gift\n"
+                f"• 💰 Other Sources"
+            )
+            return (
+                "pending_category_clarification",
+                res,
+                {
+                    "flow": "income",
+                    "amount": None,
+                    "options": INCOME_SOURCE_OPTIONS,
+                },
+            )
 
     return None
 
@@ -375,10 +725,18 @@ def generate_assistant_response(user, query: str) -> Tuple[str, str, Dict[str, A
     """Generates financial response for the authenticated user using Gemini API,
     with clean formatting (no double stars) and security sanitization.
     """
+    # 0. Check for pending multi-turn action first
+    pending = get_pending_action(user)
+    if pending:
+        handled = handle_pending_action(user, query, pending)
+        if handled:
+            action_type, resp, data = handled
+            return (sanitize_output(strip_markdown_stars(resp)), action_type, data)
+
     ctx = build_user_finance_context(user)
     sym = ctx["curr_sym"]
 
-    # 1. Check for actionable commands first
+    # 1. Check for actionable commands
     action = try_action_dispatch(user, query)
     if action:
         action_type, resp, data = action

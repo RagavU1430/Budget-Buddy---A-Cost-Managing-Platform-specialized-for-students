@@ -5,7 +5,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .agent import build_user_finance_context, generate_assistant_response
+from .agent import build_user_finance_context, clear_pending_action, generate_assistant_response
 from .guardrails import evaluate_input_guardrail
 from .models import ChatMessage
 
@@ -97,6 +97,7 @@ class ClearHistoryView(APIView):
 
     def post(self, request):
         ChatMessage.objects.filter(user=request.user).delete()
+        clear_pending_action(request.user)
         return Response({"status": "cleared", "message": "Conversation history reset."})
 
 
