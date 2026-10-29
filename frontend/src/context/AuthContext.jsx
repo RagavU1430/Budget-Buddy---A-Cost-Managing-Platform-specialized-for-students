@@ -67,6 +67,15 @@ export function AuthProvider({ children }) {
         setUser(null)
       })
       .finally(() => setLoading(false))
+
+    const handleRefresh = () => {
+      const currentAccess = localStorage.getItem(TOKEN_KEYS.access)
+      if (currentAccess) {
+        fetchMe().catch(() => {})
+      }
+    }
+    window.addEventListener('budgetbuddy:data-refresh', handleRefresh)
+    return () => window.removeEventListener('budgetbuddy:data-refresh', handleRefresh)
   }, [fetchMe, clearTokens])
 
   const value = useMemo(

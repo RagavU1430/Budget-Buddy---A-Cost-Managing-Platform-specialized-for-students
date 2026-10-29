@@ -37,6 +37,11 @@ export default function Budgets() {
 
   useEffect(() => {
     loadData()
+    const handleRefresh = () => {
+      loadData()
+    }
+    window.addEventListener('budgetbuddy:data-refresh', handleRefresh)
+    return () => window.removeEventListener('budgetbuddy:data-refresh', handleRefresh)
   }, [])
 
   const now = new Date()

@@ -50,6 +50,11 @@ export default function Transactions() {
 
   useEffect(() => {
     loadData()
+    const handleRefresh = () => {
+      loadData()
+    }
+    window.addEventListener('budgetbuddy:data-refresh', handleRefresh)
+    return () => window.removeEventListener('budgetbuddy:data-refresh', handleRefresh)
   }, [])
 
   const now = new Date()

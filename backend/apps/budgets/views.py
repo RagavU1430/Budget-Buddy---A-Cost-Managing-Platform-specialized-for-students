@@ -10,4 +10,9 @@ class BudgetViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
-        return Budget.objects.filter(user=self.request.user)
+        queryset = Budget.objects.filter(user=self.request.user)
+        if self.request.query_params.get("month"):
+            queryset = queryset.filter(month=self.request.query_params["month"] + "-01")
+        if self.request.query_params.get("category"):
+            queryset = queryset.filter(category=self.request.query_params["category"])
+        return queryset

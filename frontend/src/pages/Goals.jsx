@@ -23,7 +23,14 @@ export default function Goals() {
   const load = async () => {
     try { const { data } = await getGoals(); setGoals(normalize(data)) } catch { setGoals([]) } finally { setLoading(false) }
   }
-  useEffect(() => { load() }, [])
+  useEffect(() => {
+    load()
+    const handleRefresh = () => {
+      load()
+    }
+    window.addEventListener('budgetbuddy:data-refresh', handleRefresh)
+    return () => window.removeEventListener('budgetbuddy:data-refresh', handleRefresh)
+  }, [])
   const visible = useMemo(() => goals.filter((goal) => filter === 'all' || (filter === 'completed' ? goal.is_completed : !goal.is_completed)), [goals, filter])
   const summary = { total: goals.length, active: goals.filter((g) => !g.is_completed).length, completed: goals.filter((g) => g.is_completed).length, saved: goals.reduce((sum, g) => sum + Number(g.current_amount || 0), 0) }
 

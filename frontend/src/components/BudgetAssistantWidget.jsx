@@ -260,6 +260,14 @@ export default function BudgetAssistantWidget() {
         created_at: new Date().toISOString(),
       }
       setMessages((prev) => [...prev, botMsg])
+
+      // If an actionable command modified the database (budget, expense, income), notify UI components to re-fetch live data
+      if (
+        data.action_type &&
+        !['gemini_response', 'guardrail_blocked', 'error'].includes(data.action_type)
+      ) {
+        window.dispatchEvent(new CustomEvent('budgetbuddy:data-refresh', { detail: data }))
+      }
     } catch {
       setMessages((prev) => [
         ...prev,

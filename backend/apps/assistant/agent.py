@@ -257,11 +257,45 @@ def try_action_dispatch(user, query: str) -> Optional[Tuple[str, str, Dict[str, 
             return ("expense_created", res, {"id": expense.id, "amount": str(expense.amount), "category": expense.category})
 
     # 2. Action: Set Budget Limit
-    if ("set budget" in q_lower or "create budget" in q_lower or "allocate budget" in q_lower):
-        amount_match = re.search(r"(?:₹|rs\.?|inr)?\s*(\d+(?:\.\d{1,2})?)", q_lower)
+    is_budget_question = (
+        any(q_lower.startswith(w) for w in ["how", "what", "is there", "is it", "can i", "can you", "show", "check", "do i", "should i", "am i"])
+        or "?" in q_lower
+        or "how much" in q_lower
+        or "what is" in q_lower
+        or "what's" in q_lower
+        or "how is" in q_lower
+        or "can i afford" in q_lower
+    )
+
+    is_budget_action = not is_budget_question and (
+        bool(re.search(r"\b(set|create|allocate|update|change|make|put|add|fix)\b.*?\b(budget|limit)\b", q_lower))
+        or bool(re.search(r"\b(budget|limit)\b.*?\b(of|to|is|=|for|as|at|should be)\b", q_lower))
+        or bool(re.search(r"\b(daily|monthly)\s+(budget|limit)\b", q_lower))
+        or bool(re.search(r"\b(budget|limit)\s*[:=]?\s*(?:₹|rs\.?|inr)?\s*\d+", q_lower))
+    )
+
+    if is_budget_action:
+        amount_match = (
+            re.search(r"(?:₹|rs\.?|inr)\s*(\d+(?:,\d+)*(?:\.\d{1,2})?)", q_lower)
+            or re.search(r"(?:of|to|is|=|limit|budget)\s*(?:₹|rs\.?|inr)?\s*(\d+(?:,\d+)*(?:\.\d{1,2})?)", q_lower)
+            or re.search(r"(\d+(?:,\d+)*(?:\.\d{1,2})?)\s*(?:per day|daily|/day|per month|monthly|/month|rupees|rs)", q_lower)
+            or re.search(r"\b(\d+(?:,\d+)*(?:\.\d{1,2})?)\b", q_lower)
+        )
         if amount_match:
-            limit_amount = Decimal(amount_match.group(1))
-            matched_cat = Expense.Category.FOOD
+            raw_amount = Decimal(amount_match.group(1).replace(",", ""))
+            is_daily = any(term in q_lower for term in ["per day", "daily", "a day", "each day", "/day", "/ day", "perday"])
+
+            import calendar
+            days_in_month = calendar.monthrange(curr_date.year, curr_date.month)[1]
+
+            if is_daily:
+                daily_limit = raw_amount
+                monthly_limit = raw_amount * Decimal(days_in_month)
+            else:
+                monthly_limit = raw_amount
+                daily_limit = round(raw_amount / Decimal(days_in_month), 2)
+
+            matched_cat = Expense.Category.MISC
             for cat, keywords in CATEGORY_KEYWORDS.items():
                 if any(kw in q_lower for kw in keywords):
                     matched_cat = cat
@@ -271,18 +305,39 @@ def try_action_dispatch(user, query: str) -> Optional[Tuple[str, str, Dict[str, 
                 user=user,
                 month=month_first,
                 category=matched_cat,
-                defaults={"limit_amount": limit_amount},
+                defaults={"limit_amount": monthly_limit},
             )
 
+            # Persist preferences and target allowance on Profile
+            profile = getattr(user, "profile", None)
+            if profile:
+                if not isinstance(profile.financial_preferences, dict):
+                    profile.financial_preferences = {}
+                profile.financial_preferences["daily_budget_limit"] = float(daily_limit)
+                profile.financial_preferences["monthly_budget_target"] = float(monthly_limit)
+                if not profile.monthly_income or profile.monthly_income == Decimal("0"):
+                    profile.monthly_income = monthly_limit
+                profile.save()
+
             verb = "created" if created else "updated"
+            daily_info = f"\n• Daily Rate: ₹{daily_limit:,.2f} / day ({days_in_month} days in {month_first.strftime('%B')})" if is_daily else ""
             res = (
-                f"🎯 Monthly Budget {verb.capitalize()}!\n\n"
+                f"🎯 Monthly Budget {verb.capitalize()} Successfully!\n\n"
                 f"• Category: {budget_obj.get_category_display()}\n"
-                f"• Monthly Limit: ₹{budget_obj.limit_amount:,.2f}\n"
-                f"• Month: {month_first.strftime('%B %Y')}\n\n"
-                f"BudgetBuddy will track your spending against this limit and notify you at 80% and 100%."
+                f"• Monthly Spending Limit: ₹{budget_obj.limit_amount:,.2f}{daily_info}\n"
+                f"• Active Month: {month_first.strftime('%B %Y')}\n\n"
+                f"✅ Updated your live dashboard budget gauge and runway."
             )
-            return ("budget_created", res, {"category": budget_obj.category, "limit": str(budget_obj.limit_amount)})
+            return (
+                "budget_created",
+                res,
+                {
+                    "category": budget_obj.category,
+                    "limit": str(budget_obj.limit_amount),
+                    "daily_limit": str(daily_limit),
+                    "is_daily": is_daily,
+                },
+            )
 
     # 3. Action: Record Income
     if "income" in q_lower or "received" in q_lower or "got" in q_lower and ("money" in q_lower or "stipend" in q_lower):

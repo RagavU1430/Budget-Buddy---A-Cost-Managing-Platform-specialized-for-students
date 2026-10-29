@@ -81,6 +81,11 @@ export default function NotificationBell() {
 
   useEffect(() => {
     load()
+    const handleRefresh = () => {
+      load()
+    }
+    window.addEventListener('budgetbuddy:data-refresh', handleRefresh)
+    return () => window.removeEventListener('budgetbuddy:data-refresh', handleRefresh)
   }, [])
 
   useEffect(() => {

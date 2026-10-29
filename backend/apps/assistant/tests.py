@@ -87,6 +87,22 @@ class AssistantAPITests(APITestCase):
         self.assertIsNotNone(budget)
         self.assertEqual(budget.limit_amount, Decimal("3500"))
 
+    def test_chat_action_sets_daily_budget(self):
+        import calendar
+        from django.utils import timezone
+        now = timezone.now().date()
+        days_in_month = calendar.monthrange(now.year, now.month)[1]
+
+        res = self.client.post(self.chat_url, {"message": "set a budget of 1000 per day"})
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.assertEqual(res.data["action_type"], "budget_created")
+        self.user.refresh_from_db()
+        self.user.profile.refresh_from_db()
+        self.assertEqual(self.user.profile.financial_preferences.get("daily_budget_limit"), 1000.0)
+        budget = Budget.objects.filter(user=self.user).first()
+        self.assertIsNotNone(budget)
+        self.assertEqual(budget.limit_amount, Decimal(days_in_month * 1000))
+
     def test_assistant_summary_endpoint(self):
         res = self.client.get(self.summary_url)
         self.assertEqual(res.status_code, status.HTTP_200_OK)
