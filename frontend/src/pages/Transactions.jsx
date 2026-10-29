@@ -133,7 +133,7 @@ export default function Transactions() {
       </header>
 
       {/* Filter bar */}
-      <section className="glass rounded-[var(--radius-card)] p-4 sm:p-5">
+      <section className="glass relative z-30 rounded-[var(--radius-card)] p-4 sm:p-5">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div className="relative w-full lg:max-w-md">
             <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-fg-faint" aria-hidden="true" />
@@ -185,7 +185,7 @@ export default function Transactions() {
       </section>
 
       {/* Grouped history */}
-      <section className="flex flex-col gap-6" aria-label="Transaction history">
+      <section className="relative z-10 flex flex-col gap-6" aria-label="Transaction history">
         {loading ? (
           <div className="glass overflow-hidden rounded-[var(--radius-card)]">
             <SkeletonList count={6} label="Loading history" />

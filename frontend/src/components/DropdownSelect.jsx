@@ -36,7 +36,7 @@ export default function DropdownSelect({
   const selectedOption = options.find((opt) => opt.value === value) || options[0]
 
   return (
-    <div ref={ref} className={`relative inline-block ${className}`}>
+    <div ref={ref} className={`relative inline-block ${open ? 'z-50' : 'z-10'} ${className}`}>
       {/* Clickable pill trigger */}
       <button
         type="button"
@@ -64,7 +64,7 @@ export default function DropdownSelect({
       {open && (
         <div
           role="listbox"
-          className="absolute left-0 top-full mt-2 z-50 min-w-[190px] max-h-64 overflow-y-auto rounded-2xl border border-line-strong bg-surface-2/95 p-1.5 shadow-2xl backdrop-blur-2xl animate-[rise_0.2s_cubic-bezier(0.22,1,0.36,1)_both] scrollbar-thin"
+          className="absolute left-0 top-full mt-2 z-50 min-w-[200px] max-h-72 overflow-y-auto rounded-2xl border border-line-strong bg-[#0E1326] p-1.5 shadow-[0_20px_50px_rgba(0,0,0,0.85)] ring-1 ring-white/10 backdrop-blur-2xl animate-[rise_0.2s_cubic-bezier(0.22,1,0.36,1)_both] scrollbar-thin"
         >
           {options.map((opt) => {
             const isSelected = opt.value === value
@@ -94,3 +94,4 @@ export default function DropdownSelect({
     </div>
   )
 }
+
