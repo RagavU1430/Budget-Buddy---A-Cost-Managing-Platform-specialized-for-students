@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import {
   Bot,
   CheckCircle2,
+  GripVertical,
   Lock,
   Maximize2,
   Minimize2,
@@ -34,6 +35,99 @@ export default function BudgetAssistantWidget() {
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [initialLoaded, setInitialLoaded] = useState(false)
+
+  // Drag-and-drop state
+  const [position, setPosition] = useState(() => {
+    try {
+      const saved = localStorage.getItem('budgetbuddy_ai_pos')
+      if (saved) {
+        const parsed = JSON.parse(saved)
+        if (typeof parsed.x === 'number' && typeof parsed.y === 'number') {
+          return parsed
+        }
+      }
+    } catch {}
+    if (typeof window !== 'undefined') {
+      return {
+        x: Math.max(16, window.innerWidth - 290),
+        y: Math.max(16, window.innerHeight - 84),
+      }
+    }
+    return { x: 20, y: 100 }
+  })
+
+  const isDraggingRef = useRef(false)
+  const dragStartRef = useRef({ startX: 0, startY: 0, initialX: 0, initialY: 0 })
+  const hasMovedRef = useRef(false)
+  const currentPosRef = useRef(position)
+  const [isDraggingState, setIsDraggingState] = useState(false)
+
+  useEffect(() => {
+    currentPosRef.current = position
+  }, [position])
+
+  useEffect(() => {
+    const handleResize = () => {
+      setPosition((prev) => {
+        const buttonWidth = 270
+        const buttonHeight = 70
+        const nextX = Math.min(Math.max(12, prev.x), Math.max(12, window.innerWidth - buttonWidth))
+        const nextY = Math.min(Math.max(12, prev.y), Math.max(12, window.innerHeight - buttonHeight))
+        return { x: nextX, y: nextY }
+      })
+    }
+    window.addEventListener('resize', handleResize)
+    return () => window.removeEventListener('resize', handleResize)
+  }, [])
+
+  const handlePointerDown = (e) => {
+    if (e.button !== 0 && e.pointerType === 'mouse') return
+    isDraggingRef.current = true
+    hasMovedRef.current = false
+    dragStartRef.current = {
+      startX: e.clientX,
+      startY: e.clientY,
+      initialX: position.x,
+      initialY: position.y,
+    }
+    setIsDraggingState(true)
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId)
+    } catch {}
+  }
+
+  const handlePointerMove = (e) => {
+    if (!isDraggingRef.current) return
+    const dx = e.clientX - dragStartRef.current.startX
+    const dy = e.clientY - dragStartRef.current.startY
+    if (Math.abs(dx) > 4 || Math.abs(dy) > 4) {
+      hasMovedRef.current = true
+    }
+    const buttonWidth = 270
+    const buttonHeight = 70
+    const nextX = Math.min(Math.max(8, dragStartRef.current.initialX + dx), Math.max(8, window.innerWidth - buttonWidth))
+    const nextY = Math.min(Math.max(8, dragStartRef.current.initialY + dy), Math.max(8, window.innerHeight - buttonHeight))
+    const nextPos = { x: nextX, y: nextY }
+    currentPosRef.current = nextPos
+    setPosition(nextPos)
+  }
+
+  const handlePointerUp = (e) => {
+    if (!isDraggingRef.current) return
+    isDraggingRef.current = false
+    setIsDraggingState(false)
+    try {
+      e.currentTarget.releasePointerCapture(e.pointerId)
+    } catch {}
+
+    if (!hasMovedRef.current) {
+      setIsOpen(true)
+    } else {
+      try {
+        localStorage.setItem('budgetbuddy_ai_pos', JSON.stringify(currentPosRef.current))
+      } catch {}
+    }
+  }
 
   const messagesEndRef = useRef(null)
   const inputRef = useRef(null)
@@ -131,31 +225,51 @@ export default function BudgetAssistantWidget() {
 
   return (
     <>
-      {/* Floating launcher trigger */}
+      {/* Movable floating launcher trigger */}
       {!isOpen && (
-        <button
-          type="button"
-          onClick={() => setIsOpen(true)}
-          className="fixed bottom-6 right-6 z-50 flex items-center gap-2.5 rounded-full border border-accent/40 bg-surface/90 px-4 py-3 text-sm font-semibold text-fg shadow-2xl backdrop-blur-xl transition-all duration-300 hover:scale-105 hover:border-accent hover:shadow-glow cursor-pointer group"
-          aria-label="Open BudgetBuddy AI Assistant"
+        <div
+          role="button"
+          tabIndex={0}
+          onPointerDown={handlePointerDown}
+          onPointerMove={handlePointerMove}
+          onPointerUp={handlePointerUp}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              setIsOpen(true)
+            }
+          }}
+          style={{
+            left: `${position.x}px`,
+            top: `${position.y}px`,
+          }}
+          className={`fixed z-50 flex items-center gap-2 rounded-full border border-accent/40 bg-surface/90 px-3.5 py-2.5 text-sm font-semibold text-fg shadow-2xl backdrop-blur-xl transition-[border-color,box-shadow,transform] duration-200 hover:border-accent hover:shadow-glow cursor-grab active:cursor-grabbing select-none touch-none group ${
+            isDraggingState ? 'scale-105 shadow-glow ring-2 ring-accent/40 opacity-95' : ''
+          }`}
+          aria-label="Open BudgetBuddy AI Assistant (Drag to move)"
+          title="Drag anywhere to reposition, click to open"
         >
-          <span className="relative flex h-8 w-8 items-center justify-center rounded-full bg-accent text-on-accent shadow-sm">
+          <GripVertical className="h-4 w-4 text-fg-faint group-hover:text-fg-muted transition-colors -mr-0.5 shrink-0" />
+          <span className="relative flex h-8 w-8 items-center justify-center rounded-full bg-accent text-on-accent shadow-sm shrink-0">
             <Sparkles className="h-4 w-4 transition-transform group-hover:rotate-12" />
             <span className="absolute -top-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-emerald-400 ring-2 ring-surface animate-ping" />
           </span>
-          <div className="text-left">
+          <div className="text-left pr-1">
             <div className="text-xs font-bold font-['Outfit'] text-fg flex items-center gap-1">
               <span>BudgetBuddy AI</span>
               <span className="rounded bg-accent/20 px-1 py-0.2 text-[9px] text-accent">Active</span>
             </div>
             <div className="text-[10px] text-fg-muted">Ask anything about your budget</div>
           </div>
-        </button>
+        </div>
       )}
 
       {/* Slide-out / floating chat drawer */}
       {isOpen && (
-        <div className="fixed bottom-4 right-4 z-50 flex h-[620px] max-h-[90vh] w-full max-w-[430px] flex-col overflow-hidden rounded-3xl border border-line-strong bg-surface-2/95 shadow-2xl backdrop-blur-2xl animate-[rise_0.3s_cubic-bezier(0.22,1,0.36,1)_both]">
+        <div
+          className={`fixed bottom-4 z-50 flex h-[620px] max-h-[90vh] w-full max-w-[430px] flex-col overflow-hidden rounded-3xl border border-line-strong bg-surface-2/95 shadow-2xl backdrop-blur-2xl animate-[rise_0.3s_cubic-bezier(0.22,1,0.36,1)_both] ${
+            position.x < (typeof window !== 'undefined' ? window.innerWidth / 2 : 500) ? 'left-4' : 'right-4'
+          }`}
+        >
           {/* Header */}
           <div className="flex items-center justify-between border-b border-line bg-surface/80 px-4 py-3.5 backdrop-blur-md">
             <div className="flex items-center gap-2.5">
