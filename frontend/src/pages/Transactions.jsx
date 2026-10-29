@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Calendar, Filter, Receipt, Search, Trash2, Zap } from 'lucide-react'
+import { Calendar, ChevronDown, Filter, Receipt, Search, Trash2, Zap } from 'lucide-react'
 
 import { deleteExpense, getExpenses } from '../api/expenses'
 import { deleteIncome, getIncomes } from '../api/incomes'
@@ -148,34 +148,37 @@ export default function Transactions() {
             />
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <div className="flex items-center gap-2 rounded-full border border-line bg-white/4 px-3.5 py-2 text-fg-muted transition-colors duration-200 focus-within:border-accent/60 hover:border-line-strong">
-              <Calendar className="h-4 w-4 shrink-0" aria-hidden="true" />
+            <div className="relative flex items-center gap-2 rounded-full border border-line bg-white/4 px-3.5 py-2 text-fg-muted transition-all duration-200 focus-within:border-accent focus-within:ring-1 focus-within:ring-accent/30 hover:border-line-strong hover:bg-white/6 cursor-pointer">
+              <Calendar className="h-4 w-4 shrink-0 text-accent" aria-hidden="true" />
               <select value={range} onChange={(e) => setRange(e.target.value)} aria-label="Date range" className={selectClass}>
                 {rangeOptions.map((opt) => (
-                  <option key={opt.value} value={opt.value} className="bg-surface text-fg">
+                  <option key={opt.value} value={opt.value} className="bg-surface-2 text-fg">
                     {opt.label}
                   </option>
                 ))}
               </select>
+              <ChevronDown className="pointer-events-none h-3.5 w-3.5 shrink-0 text-fg-faint" />
             </div>
-            <div className="flex items-center gap-2 rounded-full border border-line bg-white/4 px-3.5 py-2 text-fg-muted transition-colors duration-200 focus-within:border-accent/60 hover:border-line-strong">
-              <Filter className="h-4 w-4 shrink-0" aria-hidden="true" />
+            <div className="relative flex items-center gap-2 rounded-full border border-line bg-white/4 px-3.5 py-2 text-fg-muted transition-all duration-200 focus-within:border-accent focus-within:ring-1 focus-within:ring-accent/30 hover:border-line-strong hover:bg-white/6 cursor-pointer">
+              <Filter className="h-4 w-4 shrink-0 text-accent" aria-hidden="true" />
               <select value={category} onChange={(e) => setCategory(e.target.value)} aria-label="Category" className={selectClass}>
                 {categoryOptions.map((opt) => (
-                  <option key={opt.value} value={opt.value} className="bg-surface text-fg">
+                  <option key={opt.value} value={opt.value} className="bg-surface-2 text-fg">
                     {opt.label}
                   </option>
                 ))}
               </select>
+              <ChevronDown className="pointer-events-none h-3.5 w-3.5 shrink-0 text-fg-faint" />
             </div>
-            <div className="flex items-center gap-2 rounded-full border border-line bg-white/4 px-3.5 py-2 text-fg-muted transition-colors duration-200 focus-within:border-accent/60 hover:border-line-strong">
+            <div className="relative flex items-center gap-2 rounded-full border border-line bg-white/4 px-3.5 py-2 text-fg-muted transition-all duration-200 focus-within:border-accent focus-within:ring-1 focus-within:ring-accent/30 hover:border-line-strong hover:bg-white/6 cursor-pointer">
               <select value={payment} onChange={(e) => setPayment(e.target.value)} aria-label="Payment method" className={selectClass}>
                 {paymentOptions.map((opt) => (
-                  <option key={opt.value} value={opt.value} className="bg-surface text-fg">
+                  <option key={opt.value} value={opt.value} className="bg-surface-2 text-fg">
                     {opt.label}
                   </option>
                 ))}
               </select>
+              <ChevronDown className="pointer-events-none h-3.5 w-3.5 shrink-0 text-fg-faint" />
             </div>
             {filterCount > 0 ? (
               <button
