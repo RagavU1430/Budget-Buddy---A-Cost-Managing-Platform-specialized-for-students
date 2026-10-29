@@ -15,8 +15,8 @@ const navItems = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard, end: true },
   { to: '/transactions', label: 'Transactions', icon: Receipt },
   { to: '/budgets', label: 'Budgets', icon: Target },
-  { to: '/goals', label: 'Goals 🎯', icon: Target },
-  { to: '/analytics', label: 'Analytics 📊', icon: BarChart3 },
+  { to: '/goals', label: 'Goals', icon: Target },
+  { to: '/analytics', label: 'Analytics', icon: BarChart3 },
   { to: '/profile', label: 'Profile', icon: User },
 ]
 
