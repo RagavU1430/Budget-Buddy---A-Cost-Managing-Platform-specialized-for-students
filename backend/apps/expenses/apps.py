@@ -6,3 +6,6 @@ class ExpensesConfig(AppConfig):
     name = "apps.expenses"
     label = "expenses"
     verbose_name = "Expenses & Income"
+
+    def ready(self):
+        from . import signals  # noqa: F401

@@ -50,6 +50,10 @@ class SavingsGoal(models.Model):
     def __str__(self) -> str:
         return f"{self.title} ({self.user.email})"
 
+    def save(self, *args, **kwargs):
+        self.is_completed = self.current_amount >= self.target_amount
+        super().save(*args, **kwargs)
+
     @property
     def progress_pct(self) -> float:
         """Percentage of target achieved (0–100). Computed, never stored."""

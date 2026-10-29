@@ -6,3 +6,6 @@ class GoalsConfig(AppConfig):
     name = "apps.goals"
     label = "goals"
     verbose_name = "Savings Goals"
+
+    def ready(self):
+        from . import signals  # noqa: F401

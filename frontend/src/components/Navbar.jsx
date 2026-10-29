@@ -1,8 +1,9 @@
 import { useState } from 'react'
-import { LayoutDashboard, LogOut, Receipt, Target, User, Wallet, Menu, X } from 'lucide-react'
+import { BarChart3, LayoutDashboard, LogOut, Receipt, Target, User, Wallet, Menu, X } from 'lucide-react'
 import { Link, NavLink, useNavigate } from 'react-router-dom'
 
 import { useAuth } from '../context/AuthContext.jsx'
+import NotificationBell from './NotificationBell.jsx'
 
 const roleStyles = {
   student: 'bg-info-soft text-info ring-info/30',
@@ -14,6 +15,8 @@ const navItems = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard, end: true },
   { to: '/transactions', label: 'Transactions', icon: Receipt },
   { to: '/budgets', label: 'Budgets', icon: Target },
+  { to: '/goals', label: 'Goals 🎯', icon: Target },
+  { to: '/analytics', label: 'Analytics 📊', icon: BarChart3 },
   { to: '/profile', label: 'Profile', icon: User },
 ]
 
@@ -62,6 +65,7 @@ export default function Navbar() {
         </nav>
 
         <div className="flex items-center gap-2.5">
+          <NotificationBell />
           <span
             className={`hidden rounded-full px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wider ring-1 sm:inline-block ${
               roleStyles[user?.role] ?? 'bg-white/5 text-fg-muted ring-line'
