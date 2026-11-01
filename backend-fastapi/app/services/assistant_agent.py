@@ -295,6 +295,10 @@ SYSTEM_INSTRUCTION_TEMPLATE = (
     "1. Never disclose passwords, password hashes, JWT tokens, session IDs, internal database IDs, or secrets.\n"
     "2. If the user asks for credentials or session keys, politely decline stating that security guardrails protect them.\n"
     "3. Only answer questions related to the student's budget, income, expenses, savings strategies, and website features.\n\n"
+    "SYSTEM ACTION INTEGRITY:\n"
+    "- You are an informational financial advisor. Automated database writes are processed by system action dispatchers.\n"
+    "- NEVER claim or pretend that you updated user preferences or database records (e.g. do not say 'I have updated your preferences' or 'I have set your budget') unless the system action was executed.\n"
+    "- If the user expresses intent to set a budget, log spend, or add income, instruct them clearly on the command syntax (e.g. 'Set a budget of 1000 per day', 'Spent 150 on food', or 'Received 5000 pocket money').\n\n"
     "MANDATORY FORMATTING INSTRUCTION:\n"
     "- NEVER use double asterisks (**) or single asterisks for bolding. The user hates double asterisks.\n"
     "- Format your answer with clean line breaks, emojis for section titles, and clean bullet points using '•' or dashes.\n"
@@ -780,142 +784,155 @@ async def try_action_dispatch(
         )
 
     # 2. Action: set a budget limit
-    is_budget_question = (
+    amount_match = (
+        re.search(r"(?:₹|rs\.?|inr)\s*(\d+(?:,\d+)*(?:\.\d{1,2})?)", q_lower)
+        or re.search(
+            r"(?:of|to|is|=|limit|budget)\s*(?:₹|rs\.?|inr)?\s*(\d+(?:,\d+)*(?:\.\d{1,2})?)",
+            q_lower,
+        )
+        or re.search(
+            r"(\d+(?:,\d+)*(?:\.\d{1,2})?)\s*(?:per day|daily|/day|per month|monthly|/month|rupees|rs)",
+            q_lower,
+        )
+        or re.search(r"\b(\d+(?:,\d+)*(?:\.\d{1,2})?)\b", q_lower)
+    )
+
+    is_pure_budget_question = (
         any(
             q_lower.startswith(word)
             for word in [
-                "how",
-                "what",
-                "is there",
-                "is it",
-                "can i",
-                "can you",
+                "how much",
+                "what is",
+                "what's",
+                "how is",
                 "show",
                 "check",
-                "do i",
-                "should i",
-                "am i",
+                "can i afford",
             ]
         )
-        or "?" in q_lower
-        or "how much" in q_lower
-        or "what is" in q_lower
-        or "what's" in q_lower
-        or "how is" in q_lower
-        or "can i afford" in q_lower
+        or bool(re.search(r"\b(how do i|how can i|where do i|where can i)\b", q_lower))
+        or (
+            amount_match is None
+            and (
+                "?" in q_lower
+                or any(
+                    q_lower.startswith(w)
+                    for w in ["how", "what", "is there", "is it", "can i", "do i"]
+                )
+            )
+        )
     )
 
-    is_budget_action = not is_budget_question and (
-        bool(re.search(r"\b(set|create|allocate|update|change|make|put|add|fix)\b.*?\b(budget|limit)\b", q_lower))
+    has_budget_action_words = (
+        bool(
+            re.search(
+                r"\b(set|create|allocate|update|change|make|put|add|fix)\b.*?\b(budget|limit)\b",
+                q_lower,
+            )
+        )
         or bool(re.search(r"\b(budget|limit)\b.*?\b(of|to|is|=|for|as|at|should be)\b", q_lower))
         or bool(re.search(r"\b(daily|monthly)\s+(budget|limit)\b", q_lower))
         or bool(re.search(r"\b(budget|limit)\s*[:=]?\s*(?:₹|rs\.?|inr)?\s*\d+", q_lower))
+        or (
+            bool(re.search(r"\b(budget|limit)\b", q_lower))
+            and amount_match is not None
+            and not is_pure_budget_question
+        )
     )
 
-    if is_budget_action:
-        amount_match = (
-            re.search(r"(?:₹|rs\.?|inr)\s*(\d+(?:,\d+)*(?:\.\d{1,2})?)", q_lower)
-            or re.search(
-                r"(?:of|to|is|=|limit|budget)\s*(?:₹|rs\.?|inr)?\s*(\d+(?:,\d+)*(?:\.\d{1,2})?)",
-                q_lower,
-            )
-            or re.search(
-                r"(\d+(?:,\d+)*(?:\.\d{1,2})?)\s*(?:per day|daily|/day|per month|monthly|/month|rupees|rs)",
-                q_lower,
-            )
-            or re.search(r"\b(\d+(?:,\d+)*(?:\.\d{1,2})?)\b", q_lower)
+    is_budget_action = not is_pure_budget_question and has_budget_action_words
+
+    if is_budget_action and amount_match:
+        raw_amount = Decimal(amount_match.group(1).replace(",", ""))
+        is_daily = any(
+            term in q_lower
+            for term in [
+                "per day",
+                "daily",
+                "a day",
+                "each day",
+                "/day",
+                "/ day",
+                "perday",
+            ]
         )
-        if amount_match:
-            raw_amount = Decimal(amount_match.group(1).replace(",", ""))
-            is_daily = any(
-                term in q_lower
-                for term in [
-                    "per day",
-                    "daily",
-                    "a day",
-                    "each day",
-                    "/day",
-                    "/ day",
-                    "perday",
-                ]
+
+        days_in_month = calendar.monthrange(curr_date.year, curr_date.month)[1]
+
+        if is_daily:
+            daily_limit = raw_amount
+            monthly_limit = raw_amount * Decimal(days_in_month)
+        else:
+            monthly_limit = raw_amount
+            daily_limit = round(raw_amount / Decimal(days_in_month), 2)
+
+        matched_cat = "misc"
+        for category, keywords in CATEGORY_KEYWORDS.items():
+            if any(keyword in q_lower for keyword in keywords):
+                matched_cat = category
+                break
+
+        budget = (
+            await db.execute(
+                select(models.Budget).where(
+                    models.Budget.user_id == user.id,
+                    models.Budget.month == month_first,
+                    models.Budget.category == matched_cat,
+                )
             )
+        ).scalars().first()
 
-            days_in_month = calendar.monthrange(curr_date.year, curr_date.month)[1]
+        created = budget is None
+        if budget is None:
+            budget = models.Budget(
+                user_id=user.id,
+                month=month_first,
+                category=matched_cat,
+                limit_amount=monthly_limit,
+            )
+            db.add(budget)
+        else:
+            budget.limit_amount = monthly_limit
+        await db.flush()
 
-            if is_daily:
-                daily_limit = raw_amount
-                monthly_limit = raw_amount * Decimal(days_in_month)
-            else:
-                monthly_limit = raw_amount
-                daily_limit = round(raw_amount / Decimal(days_in_month), 2)
-
-            matched_cat = "misc"
-            for category, keywords in CATEGORY_KEYWORDS.items():
-                if any(keyword in q_lower for keyword in keywords):
-                    matched_cat = category
-                    break
-
-            budget = (
-                await db.execute(
-                    select(models.Budget).where(
-                        models.Budget.user_id == user.id,
-                        models.Budget.month == month_first,
-                        models.Budget.category == matched_cat,
-                    )
-                )
-            ).scalars().first()
-
-            created = budget is None
-            if budget is None:
-                budget = models.Budget(
-                    user_id=user.id,
-                    month=month_first,
-                    category=matched_cat,
-                    limit_amount=monthly_limit,
-                )
-                db.add(budget)
-            else:
-                budget.limit_amount = monthly_limit
+        profile = user.profile
+        if profile is not None:
+            preferences = (
+                dict(profile.financial_preferences)
+                if isinstance(profile.financial_preferences, dict)
+                else {}
+            )
+            preferences["daily_budget_limit"] = float(daily_limit)
+            preferences["monthly_budget_target"] = float(monthly_limit)
+            profile.financial_preferences = preferences
+            if not profile.monthly_income or profile.monthly_income == Decimal("0"):
+                profile.monthly_income = monthly_limit
             await db.flush()
 
-            profile = user.profile
-            if profile is not None:
-                preferences = (
-                    dict(profile.financial_preferences)
-                    if isinstance(profile.financial_preferences, dict)
-                    else {}
-                )
-                preferences["daily_budget_limit"] = float(daily_limit)
-                preferences["monthly_budget_target"] = float(monthly_limit)
-                profile.financial_preferences = preferences
-                if not profile.monthly_income or profile.monthly_income == Decimal("0"):
-                    profile.monthly_income = monthly_limit
-                await db.flush()
-
-            verb = "created" if created else "updated"
-            daily_info = (
-                f"\n• Daily Rate: ₹{daily_limit:,.2f} / day "
-                f"({days_in_month} days in {month_first.strftime('%B')})"
-                if is_daily
-                else ""
-            )
-            res = (
-                f"🎯 Monthly Budget {verb.capitalize()} Successfully!\n\n"
-                f"• Category: {models.CATEGORY_LABELS[budget.category]}\n"
-                f"• Monthly Spending Limit: ₹{budget.limit_amount:,.2f}{daily_info}\n"
-                f"• Active Month: {month_first.strftime('%B %Y')}\n\n"
-                "✅ Updated your live dashboard budget gauge and runway."
-            )
-            return (
-                "budget_created",
-                res,
-                {
-                    "category": budget.category,
-                    "limit": str(budget.limit_amount),
-                    "daily_limit": str(daily_limit),
-                    "is_daily": is_daily,
-                },
-            )
+        verb = "created" if created else "updated"
+        daily_info = (
+            f"\n• Daily Rate: ₹{daily_limit:,.2f} / day "
+            f"({days_in_month} days in {month_first.strftime('%B')})"
+            if is_daily
+            else ""
+        )
+        res = (
+            f"🎯 Monthly Budget {verb.capitalize()} Successfully!\n\n"
+            f"• Category: {models.CATEGORY_LABELS[budget.category]}\n"
+            f"• Monthly Spending Limit: ₹{budget.limit_amount:,.2f}{daily_info}\n"
+            f"• Active Month: {month_first.strftime('%B %Y')}\n\n"
+            "✅ Updated your live dashboard budget gauge and runway."
+        )
+        return (
+            "budget_created",
+            res,
+            {
+                "category": budget.category,
+                "limit": str(budget.limit_amount),
+                "daily_limit": str(daily_limit),
+                "is_daily": is_daily,
+            },
+        )
 
     # 3. Action: record income / new money
     income_triggers = [

@@ -42,11 +42,13 @@ The platform provides an end-to-end financial management experience:
 ## 🛠️ Technology Stack
 
 ### Backend
-- **Framework:** [Django 5](https://www.djangoproject.com/) + [Django REST Framework](https://www.django-rest-framework.org/)
-- **Authentication:** [djangorestframework-simplejwt](https://django-rest-framework-simplejwt.readthedocs.io/) (JWT access + refresh token rotation)
-- **Security & Headers:** `django-cors-headers`, `python-dotenv`
-- **Database:** SQLite (default for local development) / PostgreSQL (production-ready)
-- **Testing:** `pytest` + `pytest-django`
+- **Framework:** [FastAPI](https://fastapi.tiangolo.com/) (High-performance async ASGI Python framework)
+- **Database & ORM:** [SQLAlchemy 2.0 (Async)](https://www.sqlalchemy.org/) + `aiosqlite` / `asyncpg`
+- **Authentication:** JWT (PyJWT + Argon2 password hashing, access + refresh token rotation)
+- **Security & Headers:** CORSMiddleware, `python-dotenv`
+- **AI Financial Intelligence:** Google Gemini AI with security guardrails & interactive clarification flows
+- **Report Generation:** ReportLab (PDF) & openpyxl (Excel)
+- **Testing:** `pytest` + `pytest-asyncio` + `httpx`
 
 ### Frontend
 - **Framework & Tooling:** [React 19](https://react.dev/) + [Vite](https://vite.dev/)
@@ -64,24 +66,18 @@ The platform provides an end-to-end financial management experience:
 budgetbuddy/
 ├── .gitignore                    # Python, Node, venv, SQLite, .env exclusions
 ├── README.md                     # Project documentation & architecture guide
-├── backend/
+├── backend-fastapi/
 │   ├── .env                      # Local environment secrets (untracked)
 │   ├── .env.example              # Template environment variables
-│   ├── manage.py                 # Django CLI entrypoint
 │   ├── pytest.ini                # Pytest configuration
-│   ├── requirements.txt          # Python dependencies
-│   ├── budgetbuddy/              # Django root settings and URL routing
-│   │   ├── settings.py
-│   │   ├── urls.py
-│   │   ├── wsgi.py
-│   │   └── asgi.py
-│   └── apps/
-│       ├── accounts/             # Custom User (student/premium/admin), Profile, JWT auth
-│       ├── expenses/             # Categories, Expenses, and Incomes schema
-│       ├── budgets/              # Monthly budgets and category allocations
-│       ├── goals/                # Savings goals tracking
-│       ├── notifications/        # Budget alerts & system notifications
-│       └── reports/              # Monthly PDF/Excel report records
+│   ├── requirements.txt          # Python FastAPI & async dependencies
+│   ├── app/
+│   │   ├── main.py               # FastAPI application factory & router registration
+│   │   ├── api/                  # REST API endpoints (auth, expenses, budgets, goals, assistant, reports, analytics)
+│   │   ├── core/                 # Config (pydantic-settings), JWT security, serializers, pagination
+│   │   ├── db/                   # SQLAlchemy 2.0 Async declarative models & session engine
+│   │   └── services/             # Gemini AI Assistant, notifications, PDF/Excel report generators
+│   └── tests/                    # Automated pytest integration test suite
 └── frontend/
     ├── .env                      # Vite environment variables (untracked)
     ├── .env.example              # Vite environment template
@@ -96,8 +92,8 @@ budgetbuddy/
         │   └── client.js         # Axios instance with JWT interceptor & refresh loop
         ├── context/
         │   └── AuthContext.jsx   # Global auth state, login, register, logout
-        ├── components/           # Reusable UI components (Navbar, Layout, ProtectedRoute)
-        └── pages/                # Login, Register, Dashboard, Profile, NotFound
+        ├── components/           # Reusable UI components (Navbar, Layout, ProtectedRoute, AI Assistant)
+        └── pages/                # Login, Register, Dashboard, Budgets, Goals, Transactions, Profile, Analytics
 ```
 
 ---
@@ -115,7 +111,7 @@ budgetbuddy/
 
 1. **Navigate to the backend directory:**
    ```bash
-   cd backend
+   cd backend-fastapi
    ```
 
 2. **Create and activate a virtual environment:**
@@ -145,21 +141,19 @@ budgetbuddy/
      cp .env.example .env
      ```
 
-5. **Run database migrations:**
-   ```bash
-   python manage.py migrate
-   ```
+5. **Initialize Database Tables:**
+   The SQLite / PostgreSQL schema initializes automatically on first startup via SQLAlchemy declarative metadata.
 
 6. **(Optional) Run automated tests:**
    ```bash
-   pytest
+   pytest -v
    ```
 
-7. **Start the Django development server:**
+7. **Start the FastAPI development server:**
    ```bash
-   python manage.py runserver 8000
+   uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
    ```
-   Backend will be running at `http://127.0.0.1:8000/`.
+   Backend will be running at `http://127.0.0.1:8000/`. Interactive Swagger API docs are available at `http://127.0.0.1:8000/docs`.
 
 ---
 
@@ -233,21 +227,19 @@ python manage.py seed_demo_users --password "YourSecurePass!123"
 
 ## 🧪 Automated Testing
 
-Run the full pytest suite from the `backend/` directory:
+Run the full pytest suite from the `backend-fastapi/` directory:
 ```bash
 pytest -v
 ```
-All 11 tests verify:
+Integration tests verify:
 - User registration with default `student` role and automatic `Profile` creation
-- Duplicate email prevention
+- Duplicate email & username prevention
 - Password confirmation mismatch validation
 - JWT login returning access & refresh tokens
 - Invalid credential rejection (401)
 - Protected `/api/auth/me/` access control (401 for anonymous)
-- JWT token refresh flow
-- Staff/Admin role-based endpoint isolation (403 for students)
-- Admin privilege gate test endpoint (`GET /api/auth/admin-only/`)
-- Admin user role promotion (`student` ➔ `premium`)
+- AI assistant natural language budget setup with real-time database persistence
+- Multi-turn conversational categorization for income and expense logging
 
 ---
 
