@@ -1,0 +1,19 @@
+# Python virtual environment
+venv/
+.venv/
+__pycache__/
+*.py[cod]
+*$py.class
+*.sqlite3
+*.db
+.env
+.DS_Store
+
+# Local media storage
+media/
+reports/
+
+# Test / coverage
+.pytest_cache/
+.coverage
+htmlcov/
