@@ -44,7 +44,11 @@ class Settings(BaseSettings):
     PAGE_SIZE: int = 20
 
     # CORS
-    CORS_ORIGINS: str = "http://localhost:5173,http://127.0.0.1:5173"
+    CORS_ORIGINS: str = (
+        "http://localhost:5173,http://127.0.0.1:5173,"
+        "https://budgetbuddy-student.vercel.app,https://frontend-iota-black-70.vercel.app"
+    )
+    CORS_ORIGIN_REGEX: str = r"^https://.*\.vercel\.app$"
 
     # Assistant
     GEMINI_API_KEY: str = ""
@@ -63,7 +67,23 @@ class Settings(BaseSettings):
 
     @property
     def cors_origins(self) -> list[str]:
-        return [item.strip() for item in self.CORS_ORIGINS.split(",") if item.strip()]
+        raw = (self.CORS_ORIGINS or "").strip()
+        if not raw:
+            return []
+        if raw.startswith("[") and raw.endswith("]"):
+            try:
+                import json
+                parsed = json.loads(raw)
+                if isinstance(parsed, list):
+                    return [str(x).strip() for x in parsed if str(x).strip()]
+            except Exception:
+                pass
+        items = []
+        for item in raw.split(","):
+            cleaned = item.strip().strip("[]\"' ")
+            if cleaned:
+                items.append(cleaned)
+        return items
 
     @property
     def gemini_models(self) -> list[str]:
