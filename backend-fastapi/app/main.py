@@ -30,12 +30,22 @@ from app.services.storage import ensure_local_media_root
 async def lifespan(app: FastAPI):
     """Startup and shutdown lifecycle."""
     # Ensure local media directory exists
-    ensure_local_media_root()
+    try:
+        ensure_local_media_root()
+    except Exception:
+        pass
 
-    # Automatically initialize tables in dev SQLite if needed
+    # Automatically initialize tables in SQLite if needed
     if "sqlite" in settings.DATABASE_URL:
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
+        try:
+            from app.db.session import SessionLocal
+            from app.scripts.seed_demo_users import auto_seed_if_empty
+            async with SessionLocal() as seed_session:
+                await auto_seed_if_empty(seed_session)
+        except Exception:
+            pass
 
     yield
 
@@ -68,9 +78,22 @@ async def api_error_handler(request: Request, exc: APIError):
     return JSONResponse(status_code=exc.status_code, content=exc.body)
 
 
+# Normalize serverless paths (if deployment platform strips /api prefix)
+@app.middleware("http")
+async def normalize_api_path(request: Request, call_next):
+    path = request.scope.get("path", "")
+    if path and not path.startswith("/api") and path != "/" and not path.startswith("/docs") and not path.startswith("/redoc") and not path.startswith("/openapi"):
+        request.scope["path"] = f"/api{path}"
+    response = await call_next(request)
+    return response
+
+
 # Health check endpoint matching Django: /api/health/
 @app.get("/api/health/")
+@app.get("/api/health")
 @app.get("/health/")
+@app.get("/health")
+@app.get("/")
 async def health():
     return {"status": "ok", "service": "budgetbuddy-api"}
 

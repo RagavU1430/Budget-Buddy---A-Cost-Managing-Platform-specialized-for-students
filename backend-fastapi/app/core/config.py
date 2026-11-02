@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from functools import lru_cache
 from typing import Any
 
@@ -35,6 +36,23 @@ class Settings(BaseSettings):
     DATABASE_URL: str = "sqlite+aiosqlite:///./budgetbuddy.db"
     # Optional direct (non-pooled) URL for Alembic. Falls back to DATABASE_URL.
     DIRECT_DATABASE_URL: str | None = None
+
+    @field_validator("DATABASE_URL", mode="before")
+    @classmethod
+    def parse_database_url(cls, v: Any) -> str:
+        url = str(v).strip() if v else "sqlite+aiosqlite:///./budgetbuddy.db"
+        # In serverless environments (Vercel/AWS Lambda), the root filesystem is read-only
+        if (os.getenv("VERCEL") or os.getenv("AWS_LAMBDA_FUNCTION_NAME")) and "sqlite" in url and not url.startswith("sqlite+aiosqlite:////tmp/"):
+            return "sqlite+aiosqlite:////tmp/budgetbuddy.db"
+        return url
+
+    @field_validator("LOCAL_STORAGE_DIR", mode="before")
+    @classmethod
+    def parse_local_storage_dir(cls, v: Any) -> str:
+        # In serverless environments, store files in writable /tmp
+        if os.getenv("VERCEL") or os.getenv("AWS_LAMBDA_FUNCTION_NAME"):
+            return "/tmp/media"
+        return str(v or "./media")
 
     # JWT lifetimes — DRF SimpleJWT parity.
     ACCESS_TOKEN_MINUTES: int = 60

@@ -144,6 +144,36 @@ async def seed_demo_users(password: str | None = None, dry_run: bool = False) ->
         print()
 
 
+async def auto_seed_if_empty(session: AsyncSession) -> None:
+    """Ensure baseline demo accounts exist so login works out-of-the-box."""
+    from sqlalchemy import select
+    for user_data in DEMO_USERS:
+        existing = (await session.execute(
+            select(models.User).where(models.User.email == user_data["email"])
+        )).scalars().first()
+        if existing is None:
+            user = models.User(
+                email=user_data["email"],
+                username=user_data["username"],
+                first_name=user_data["first_name"],
+                last_name=user_data["last_name"],
+                role=user_data["role"],
+                is_active=True,
+                is_staff=user_data["role"] == "admin",
+                is_superuser=user_data["role"] == "admin",
+                password=hash_password("Password123!"),
+            )
+            session.add(user)
+            await session.flush()
+            profile = models.Profile(
+                user_id=user.id,
+                monthly_income=user_data["monthly_income"],
+                currency="INR",
+            )
+            session.add(profile)
+    await session.commit()
+
+
 def main() -> int:
     """CLI entry point."""
     parser = argparse.ArgumentParser(
