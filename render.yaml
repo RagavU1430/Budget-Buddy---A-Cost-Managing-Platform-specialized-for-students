@@ -1,0 +1,75 @@
+# Budget Buddy - Render Full-Stack Deployment Configuration
+# Deploy this file by connecting your GitHub repo to Render
+
+services:
+  # Backend FastAPI Service
+  - type: web
+    name: budgetbuddy-backend
+    env: python
+    plan: free
+    region: oregon
+    buildCommand: pip install -r backend-fastapi/requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    timeout: 30
+    healthCheckPath: /api/health/
+    envVars:
+      - key: DATABASE_URL
+        # Use PostgreSQL database (see below)
+        fromDatabase:
+          name: budgetbuddy-db
+          property: connectionString
+      - key: SECRET_KEY
+        sync: false
+        generateValue: true
+        description: "Secret key for JWT token signing"
+      - key: GEMINI_API_KEY
+        sync: false
+        description: "Google Gemini API key for AI assistant"
+      - key: CORS_ORIGINS
+        value: '["https://budgetbuddy-frontend.onrender.com","http://localhost:5173"]'
+      - key: STORAGE_BACKEND
+        value: 'local'
+      - key: DEBUG
+        value: 'false'
+      - key: LOCAL_STORAGE_DIR
+        value: '/app/media'
+    autoDeploy: true
+    branches:
+      main:
+        enabled: true
+
+  # Frontend Static Site
+  - type: web
+    name: budgetbuddy-frontend
+    env: static
+    plan: free
+    region: oregon
+    buildCommand: cd frontend && npm ci && npm run build
+    staticPublishPath: ./frontend/dist
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    envVars:
+      - key: VITE_API_URL
+        value: https://budgetbuddy-backend.onrender.com
+    autoDeploy: true
+    branches:
+      main:
+        enabled: true
+
+# Render PostgreSQL Database
+databases:
+  - name: budgetbuddy-db
+    region: oregon
+    plan: free
+    postgresVersion: "15"
+
+# Background worker for notifications (optional - for production)
+# - type: background-library
+#   name: budgetbuddy-worker
+#   env: python
+#   plan: free
+#   buildCommand: pip install -r backend-fastapi/requirements.txt
+#   startCommand: python -m app.services.worker
+#   envVars: from: budgetbuddy-backend

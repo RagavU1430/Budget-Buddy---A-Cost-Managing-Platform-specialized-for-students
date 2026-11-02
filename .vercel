@@ -1,0 +1,7 @@
+# Vercel project settings
+# Project name: budgetbuddy
+# Framework: Custom (Next.js not applicable for this monorepo)
+# Root Directory: frontend/
+# Build Command: npm run build
+# Output Directory: dist
+# Dev Command: npm run dev

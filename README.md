@@ -98,6 +98,50 @@ budgetbuddy/
 
 ---
 
+## 🚀 Deployment
+
+### Option 1: Render (Recommended - Full-Stack)
+
+Deploy both frontend and backend with a single `render.yaml` configuration:
+
+```bash
+# 1. Connect GitHub repo to Render
+# 2. Add environment secrets:
+#    - SECRET_KEY (64-character random string)
+#    - GEMINI_API_KEY (Google Gemini API key)
+# 3. Click "Manual Deploy"
+```
+
+See `render.yaml` for complete configuration.
+
+### Option 2: Vercel + Render (Frontend on Vercel, Backend on Render)
+
+**Frontend (Vercel):**
+```bash
+cd frontend
+vercel --prod
+```
+
+Configure environment variables in Vercel dashboard:
+- `VITE_API_URL` - Point to your Render backend (e.g., https://budgetbuddy.onrender.com)
+
+**Backend (Render):**
+```bash
+# In Render dashboard:
+# 1. Create new Web Service
+# 2. Set Root Directory: backend-fastapi
+# 3. Build Command: pip install -r requirements.txt
+# 4. Start Command: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+```
+
+### Option 3: Vercel Serverless (Experimental - Not Recommended for Production)
+
+For API routes on Vercel, create files in `api/` directory:
+- Each `.py` file becomes a serverless function
+- FastAPI apps require custom ASGI adapter (see `api/` folder)
+
+---
+
 ## 🚀 Getting Started
 
 ### Prerequisites
