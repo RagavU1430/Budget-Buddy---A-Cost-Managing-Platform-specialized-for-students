@@ -8,7 +8,8 @@ services:
     env: python
     plan: free
     region: oregon
-    buildCommand: pip install -r backend-fastapi/requirements.txt
+    rootDir: backend-fastapi
+    buildCommand: pip install -r requirements.txt
     startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
     timeout: 30
     healthCheckPath: /api/health/
@@ -26,7 +27,7 @@ services:
         sync: false
         description: "Google Gemini API key for AI assistant"
       - key: CORS_ORIGINS
-        value: '["https://budgetbuddy-frontend.onrender.com","http://localhost:5173"]'
+        value: 'https://budgetbuddy-student.vercel.app,https://frontend-iota-black-70.vercel.app,http://localhost:5173,https://budgetbuddy-frontend.onrender.com'
       - key: STORAGE_BACKEND
         value: 'local'
       - key: DEBUG

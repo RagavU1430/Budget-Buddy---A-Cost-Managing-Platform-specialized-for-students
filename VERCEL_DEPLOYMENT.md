@@ -67,7 +67,7 @@ vercel --prod
 3. **Environment Variables in Render:**
    - `DATABASE_URL`: Your Supabase connection string
    - `SECRET_KEY`: Generate with `python -c "import secrets; print(secrets.token_urlsafe(64))"`
-   - `CORS_ORIGINS`: `["https://budgetbuddy.vercel.app"]`
+   - `CORS_ORIGINS`: `https://budgetbuddy-student.vercel.app,https://frontend-iota-black-70.vercel.app,http://localhost:5173`
    - `DEBUG`: `false`
    - `STORAGE_BACKEND`: `supabase`
 
