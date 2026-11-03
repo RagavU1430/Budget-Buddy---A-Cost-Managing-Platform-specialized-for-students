@@ -351,6 +351,35 @@ def _profile_field_errors(body: dict[str, Any]) -> dict[str, list[str]]:
     """ProfileSerializer field validation (message parity)."""
     errors: dict[str, list[str]] = {}
 
+    if "first_name" in body:
+        value = body["first_name"]
+        if value is not None and not isinstance(value, str):
+            errors.setdefault("first_name", []).append("Not a valid string.")
+        elif value and len(str(value).strip()) > 150:
+            errors.setdefault("first_name", []).append(
+                "Ensure this field has no more than 150 characters."
+            )
+
+    if "last_name" in body:
+        value = body["last_name"]
+        if value is not None and not isinstance(value, str):
+            errors.setdefault("last_name", []).append("Not a valid string.")
+        elif value and len(str(value).strip()) > 150:
+            errors.setdefault("last_name", []).append(
+                "Ensure this field has no more than 150 characters."
+            )
+
+    if "username" in body:
+        value = body["username"]
+        if value is None or not str(value).strip():
+            errors.setdefault("username", []).append(BLANK)
+        elif len(str(value).strip()) > 150:
+            errors.setdefault("username", []).append(
+                "Ensure this field has no more than 150 characters."
+            )
+        elif not USERNAME_RE.fullmatch(str(value).strip()):
+            errors.setdefault("username", []).append(USERNAME_FORMAT)
+
     if "phone" in body:
         value = body["phone"]
         if value is None:
@@ -441,6 +470,26 @@ async def update_me(request: Request, user: CurrentUser, db: DbSession):
         profile = models.Profile(user_id=user.id)
         db.add(profile)
         await db.flush()
+
+    if "first_name" in body and body["first_name"] is not None:
+        user.first_name = str(body["first_name"]).strip()
+    if "last_name" in body and body["last_name"] is not None:
+        user.last_name = str(body["last_name"]).strip()
+    if "username" in body and body["username"] is not None:
+        new_username = str(body["username"]).strip()
+        if new_username and new_username != user.username:
+            existing = (
+                await db.execute(
+                    select(models.User).where(
+                        models.User.username == new_username, models.User.id != user.id
+                    )
+                )
+            ).scalar_one_or_none()
+            if existing:
+                raise validation_error(
+                    {"username": ["A user with that username already exists."]}
+                )
+            user.username = new_username
 
     if "phone" in body and body["phone"] is not None:
         profile.phone = str(body["phone"]).strip()
