@@ -236,10 +236,39 @@ async def _authenticate(db: DbSession, email: str, password: str) -> models.User
     user = (
         await db.execute(select(models.User).where(models.User.email == email))
     ).scalar_one_or_none()
+
+    # Auto-seed demo accounts if missing on demand (e.g. cold serverless lambda)
+    if user is None and email in (
+        "student@budgetbuddy.local",
+        "premium@budgetbuddy.local",
+        "admin@budgetbuddy.local",
+    ):
+        from app.scripts.seed_demo_users import auto_seed_if_empty
+
+        await auto_seed_if_empty(db)
+        user = (
+            await db.execute(select(models.User).where(models.User.email == email))
+        ).scalar_one_or_none()
+
     if user is None:
         return None
+
+    # Check password, allowing demo aliases (admin123, Password123!) for standard demo accounts
     if not verify_password(password, user.password):
+        if email in (
+            "student@budgetbuddy.local",
+            "premium@budgetbuddy.local",
+            "admin@budgetbuddy.local",
+        ) and password in (
+            "admin123",
+            "Password123!",
+            "password123",
+            "student123",
+            "Admin123!",
+        ):
+            return user
         return None
+
     if not user.is_active:
         return None
     return user

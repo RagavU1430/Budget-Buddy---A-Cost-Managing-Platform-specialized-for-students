@@ -32,8 +32,8 @@ export default function Login() {
     setForm((current) => ({ ...current, [name]: value }))
   }
 
-  const fillDemoRole = (email) => {
-    setForm({ email, password: 'admin123' })
+  const fillDemoRole = (email, password = 'Password123!') => {
+    setForm({ email, password })
     setError('')
   }
 

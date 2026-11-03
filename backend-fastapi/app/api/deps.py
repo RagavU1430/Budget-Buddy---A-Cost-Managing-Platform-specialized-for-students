@@ -114,6 +114,20 @@ async def get_current_user(request: Request, db: DbSession) -> models.User:
 
     user = await db.get(models.User, user_id)
     if user is None:
+        email = payload.get("email")
+        if email in (
+            "student@budgetbuddy.local",
+            "premium@budgetbuddy.local",
+            "admin@budgetbuddy.local",
+        ):
+            from app.scripts.seed_demo_users import auto_seed_if_empty
+
+            await auto_seed_if_empty(db)
+            user = (
+                await db.execute(select(models.User).where(models.User.email == email))
+            ).scalar_one_or_none()
+
+    if user is None:
         raise _unauthorized({"detail": "User not found"})
     if not user.is_active:
         raise _unauthorized({"detail": "User is inactive"})
