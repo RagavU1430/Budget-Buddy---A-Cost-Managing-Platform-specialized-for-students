@@ -2,7 +2,7 @@ import axios from 'axios'
 
 const API_BASE_URL = typeof import.meta.env.VITE_API_URL === 'string' && import.meta.env.VITE_API_URL
   ? import.meta.env.VITE_API_URL
-  : (import.meta.env.PROD ? 'https://budgetbuddy-student.vercel.app' : 'http://127.0.0.1:8000')
+  : (import.meta.env.PROD ? 'https://budgetbuddy-app-six.vercel.app/api' : 'http://127.0.0.1:8000/api')
 
 export const TOKEN_KEYS = {
   access: 'budgetbuddy.access',
@@ -15,6 +15,10 @@ const api = axios.create({
 })
 
 api.interceptors.request.use((config) => {
+  // Prevent double /api/ prefix if already present in baseURL
+  if (config.url && config.url.startsWith('/api/')) {
+    config.url = config.url.replace('/api/', '/')
+  }
   const access = localStorage.getItem(TOKEN_KEYS.access)
   if (access) {
     config.headers.Authorization = `Bearer ${access}`
