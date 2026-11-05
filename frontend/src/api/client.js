@@ -2,7 +2,7 @@ import axios from 'axios'
 
 const API_BASE_URL = typeof import.meta.env.VITE_API_URL === 'string' && import.meta.env.VITE_API_URL
   ? import.meta.env.VITE_API_URL
-  : (import.meta.env.PROD ? 'https://budgetbuddy-app-six.vercel.app/api' : 'http://127.0.0.1:8000/api')
+  : (import.meta.env.PROD ? 'https://budgetbuddy-student.vercel.app' : 'http://127.0.0.1:8000')
 
 export const TOKEN_KEYS = {
   access: 'budgetbuddy.access',

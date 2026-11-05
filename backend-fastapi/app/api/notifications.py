@@ -71,6 +71,34 @@ async def create_notification(request: Request, user: CurrentUser, db: DbSession
     return notification_dict(notification)
 
 
+@router.post("/notifications/mark-all-read/", response_model=None)
+@router.post("/notifications/mark_all_read/", response_model=None)
+async def mark_all_read(request: Request, user: CurrentUser, db: DbSession):
+    _ = request
+    await db.execute(
+        update(models.Notification)
+        .where(
+            models.Notification.user_id == user.id,
+            models.Notification.is_read.is_(False),
+        )
+        .values(is_read=True)
+    )
+    await db.commit()
+    return {"updated": True}
+
+
+@router.get("/notifications/unread-count/", response_model=None)
+@router.get("/notifications/unread_count/", response_model=None)
+async def unread_count(request: Request, user: CurrentUser, db: DbSession):
+    _ = request
+    stmt = select(func.count()).select_from(models.Notification).where(
+        models.Notification.user_id == user.id,
+        models.Notification.is_read.is_(False),
+    )
+    total = (await db.execute(stmt)).scalar() or 0
+    return {"count": total, "unread_count": total}
+
+
 @router.get("/notifications/{pk}/", response_model=None)
 async def retrieve_notification(pk: str, user: CurrentUser, db: DbSession):
     notification = await owned_object(db, models.Notification, user, pk)
@@ -102,6 +130,7 @@ async def delete_notification(pk: str, user: CurrentUser, db: DbSession):
 
 
 @router.post("/notifications/{pk}/mark_read/", response_model=None)
+@router.post("/notifications/{pk}/mark-read/", response_model=None)
 async def mark_read(pk: str, request: Request, user: CurrentUser, db: DbSession):
     _ = request  # the POST body is unused, exactly like DRF's action
     notification = await owned_object(db, models.Notification, user, pk)
@@ -109,26 +138,3 @@ async def mark_read(pk: str, request: Request, user: CurrentUser, db: DbSession)
     await db.commit()
     await db.refresh(notification)
     return notification_dict(notification)
-
-
-@router.post("/notifications/mark-all-read/", response_model=None)
-async def mark_all_read(request: Request, user: CurrentUser, db: DbSession):
-    _ = request
-    await db.execute(
-        update(models.Notification)
-        .where(
-            models.Notification.user_id == user.id,
-            models.Notification.is_read.is_(False),
-        )
-        .values(is_read=True)
-    )
-    await db.commit()
-    return {"updated": True}
-
-
-@router.get("/notifications/unread-count/", response_model=None)
-async def unread_count(request: Request, user: CurrentUser, db: DbSession):
-    stmt = _scoped_stmt(request, user, for_count=True)
-    count_rows = select(func.count()).select_from(stmt.subquery())
-    total = (await db.execute(count_rows)).scalar_one()
-    return {"count": total}
