@@ -31,11 +31,10 @@ async def ensure_db_initialized():
         except Exception:
             pass
 
-        if "sqlite" in settings.DATABASE_URL:
-            async with engine.begin() as conn:
-                await conn.run_sync(Base.metadata.create_all)
-            async with SessionLocal() as seed_session:
-                await auto_seed_if_empty(seed_session)
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        async with SessionLocal() as seed_session:
+            await auto_seed_if_empty(seed_session)
     except Exception as exc:
         print("Database auto-init error:", exc)
 
@@ -57,7 +56,9 @@ class VercelPathFixMiddleware:
             if "__vercel_path__" in query_params:
                 matched_subpath = query_params.pop("__vercel_path__")[0]
                 clean_subpath = matched_subpath.lstrip("/")
-                new_path = f"/api/{clean_subpath}"
+                # The FastAPI app normalizes paths by adding /api prefix,
+                # so we pass the path without /api here. The middleware will add it.
+                new_path = f"/{clean_subpath}" if clean_subpath else "/api"
                 scope["path"] = new_path
                 scope["raw_path"] = new_path.encode("latin1")
 

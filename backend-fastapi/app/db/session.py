@@ -29,16 +29,20 @@ TRANSACTION_POOLER_PORT = 6543
 
 
 def _connect_args(url: str) -> dict[str, Any]:
-    """asyncpg options that depend on the Supabase pooler mode."""
+    """asyncpg options that depend on the Supabase / Neon / remote pooler mode."""
     if not url.startswith("postgresql+asyncpg"):
         return {}
+    args: dict[str, Any] = {}
     try:
-        port = urlsplit(url.replace("postgresql+asyncpg", "postgresql", 1)).port
-    except ValueError:  # pragma: no cover - malformed URL
-        return {}
-    if port == TRANSACTION_POOLER_PORT:
-        return {"statement_cache_size": 0}
-    return {}
+        parsed = urlsplit(url.replace("postgresql+asyncpg", "postgresql", 1))
+        port = parsed.port
+        if port == TRANSACTION_POOLER_PORT:
+            args["statement_cache_size"] = 0
+        if parsed.hostname and parsed.hostname not in ("localhost", "127.0.0.1"):
+            args["ssl"] = "require"
+    except Exception:
+        pass
+    return args
 
 
 def _build_engine(url: str) -> AsyncEngine:

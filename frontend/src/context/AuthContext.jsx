@@ -19,14 +19,14 @@ export function AuthProvider({ children }) {
   }, [])
 
   const fetchMe = useCallback(async () => {
-    const { data } = await api.get('/api/auth/me/')
+    const { data } = await api.get('/auth/me/')
     setUser(data)
     return data
   }, [])
 
   const login = useCallback(
     async ({ email, password }) => {
-      const { data } = await api.post('/api/auth/login/', { email, password })
+      const { data } = await api.post('/auth/login/', { email, password })
       storeTokens(data)
       setUser(data.user)
       return data.user
@@ -36,7 +36,7 @@ export function AuthProvider({ children }) {
 
   const register = useCallback(
     async (payload) => {
-      const { data } = await api.post('/api/auth/register/', payload)
+      const { data } = await api.post('/auth/register/', payload)
       storeTokens(data)
       setUser(data.user)
       return data.user
@@ -50,7 +50,7 @@ export function AuthProvider({ children }) {
   }, [clearTokens])
 
   const updateProfile = useCallback(async (payload) => {
-    const { data } = await api.patch('/api/auth/me/', payload)
+    const { data } = await api.patch('/auth/me/', payload)
     setUser(data)
     return data
   }, [])

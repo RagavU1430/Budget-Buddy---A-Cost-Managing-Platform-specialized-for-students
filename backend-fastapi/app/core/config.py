@@ -40,9 +40,34 @@ class Settings(BaseSettings):
     @field_validator("DATABASE_URL", mode="before")
     @classmethod
     def parse_database_url(cls, v: Any) -> str:
-        url = str(v).strip() if v else "sqlite+aiosqlite:///./budgetbuddy.db"
-        # In serverless environments (Vercel/AWS Lambda), the root filesystem is read-only
-        if (os.getenv("VERCEL") or os.getenv("AWS_LAMBDA_FUNCTION_NAME")) and "sqlite" in url and not url.startswith("sqlite+aiosqlite:////tmp/"):
+        raw = (
+            v
+            or os.getenv("DATABASE_URL")
+            or os.getenv("POSTGRES_URL")
+            or os.getenv("POSTGRES_PRISMA_URL")
+            or "sqlite+aiosqlite:///./budgetbuddy.db"
+        )
+        url = str(raw).strip()
+
+        # Strip sslmode query parameter so asyncpg handles SSL via connect_args cleanly
+        if "sslmode=" in url:
+            import re
+            url = re.sub(r"[?&]sslmode=[^&]+", "", url)
+            if "?" not in url and "&" in url:
+                url = url.replace("&", "?", 1)
+
+        # Normalize postgres driver to asyncpg for SQLAlchemy async engine
+        if url.startswith("postgres://"):
+            url = url.replace("postgres://", "postgresql+asyncpg://", 1)
+        elif url.startswith("postgresql://") and not url.startswith("postgresql+asyncpg://"):
+            url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
+
+        # In serverless environments without cloud Postgres, route SQLite to writable /tmp
+        if (
+            (os.getenv("VERCEL") or os.getenv("AWS_LAMBDA_FUNCTION_NAME"))
+            and "sqlite" in url
+            and not url.startswith("sqlite+aiosqlite:////tmp/")
+        ):
             return "sqlite+aiosqlite:////tmp/budgetbuddy.db"
         return url
 

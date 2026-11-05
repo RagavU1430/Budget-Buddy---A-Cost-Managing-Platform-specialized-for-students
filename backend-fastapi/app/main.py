@@ -35,17 +35,16 @@ async def lifespan(app: FastAPI):
     except Exception:
         pass
 
-    # Automatically initialize tables in SQLite if needed
-    if "sqlite" in settings.DATABASE_URL:
+    # Automatically initialize tables and baseline seed if needed
+    try:
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
-        try:
-            from app.db.session import SessionLocal
-            from app.scripts.seed_demo_users import auto_seed_if_empty
-            async with SessionLocal() as seed_session:
-                await auto_seed_if_empty(seed_session)
-        except Exception:
-            pass
+        from app.db.session import SessionLocal
+        from app.scripts.seed_demo_users import auto_seed_if_empty
+        async with SessionLocal() as seed_session:
+            await auto_seed_if_empty(seed_session)
+    except Exception:
+        pass
 
     yield
 

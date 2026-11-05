@@ -2,7 +2,7 @@ import axios from 'axios'
 
 const API_BASE_URL = typeof import.meta.env.VITE_API_URL === 'string' && import.meta.env.VITE_API_URL
   ? import.meta.env.VITE_API_URL
-  : (import.meta.env.PROD ? 'https://budgetbuddy-app-six.vercel.app' : 'http://127.0.0.1:8000')
+  : (import.meta.env.PROD ? 'https://budgetbuddy-student.vercel.app' : 'http://127.0.0.1:8000')
 
 export const TOKEN_KEYS = {
   access: 'budgetbuddy.access',
@@ -31,7 +31,7 @@ api.interceptors.response.use(
     if (error.response?.status === 401 && original && !original._retried && refresh) {
       original._retried = true
       try {
-        const { data } = await axios.post(`${API_BASE_URL}/api/auth/refresh/`, { refresh })
+        const { data } = await api.post('/auth/refresh/', { refresh })
         localStorage.setItem(TOKEN_KEYS.access, data.access)
         if (data.refresh) {
           localStorage.setItem(TOKEN_KEYS.refresh, data.refresh)
