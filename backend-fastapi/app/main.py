@@ -35,10 +35,13 @@ async def lifespan(app: FastAPI):
     except Exception:
         pass
 
-    # Automatically initialize tables in production Supabase / Postgres
+    # Automatically initialize tables and security policies in production Supabase / Postgres
     try:
+        from app.db.security_fix import apply_database_security_hardening
+
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
+            await apply_database_security_hardening(conn)
         from app.db.session import SessionLocal
         from sqlalchemy import delete
         async with SessionLocal() as session:

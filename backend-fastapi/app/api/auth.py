@@ -623,3 +623,36 @@ async def user_stats(request: Request, db: DbSession):
         "users": users,
     }
 
+
+# ---------------------------------------------------------------------------
+# GET /api/auth/security-status/ (admin / diagnostic check for RLS on tables)
+# ---------------------------------------------------------------------------
+@router.get("/security-status/", response_model=None)
+async def security_status(request: Request, db: DbSession):
+    key = request.query_params.get("key")
+    if key != "budgetbuddy_admin" and not settings.DEBUG:
+        raise APIError(403, {"detail": "Admin access key required."})
+
+    from app.db.security_fix import get_database_security_status
+
+    conn = await db.connection()
+    return await get_database_security_status(conn)
+
+
+# ---------------------------------------------------------------------------
+# POST /api/auth/security-fix/ (admin trigger to enforce RLS and revoke public access)
+# ---------------------------------------------------------------------------
+@router.post("/security-fix/", response_model=None)
+async def security_fix(request: Request, db: DbSession):
+    key = request.query_params.get("key")
+    if key != "budgetbuddy_admin" and not settings.DEBUG:
+        raise APIError(403, {"detail": "Admin access key required."})
+
+    from app.db.security_fix import apply_database_security_hardening
+
+    conn = await db.connection()
+    res = await apply_database_security_hardening(conn)
+    await db.commit()
+    return res
+
+

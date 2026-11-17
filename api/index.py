@@ -32,8 +32,11 @@ async def ensure_db_initialized():
         except Exception:
             pass
 
+        from app.db.security_fix import apply_database_security_hardening
+
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
+            await apply_database_security_hardening(conn)
         async with SessionLocal() as seed_session:
             demo_emails = [
                 "student@budgetbuddy.local",
