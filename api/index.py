@@ -24,7 +24,8 @@ async def ensure_db_initialized():
         from app.db.base import Base
         from app.db.session import engine, SessionLocal
         from app.services.storage import ensure_local_media_root
-        from app.scripts.seed_demo_users import auto_seed_if_empty
+        from sqlalchemy import delete
+        from app.db import models
 
         try:
             ensure_local_media_root()
@@ -34,7 +35,13 @@ async def ensure_db_initialized():
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
         async with SessionLocal() as seed_session:
-            await auto_seed_if_empty(seed_session)
+            demo_emails = [
+                "student@budgetbuddy.local",
+                "premium@budgetbuddy.local",
+                "admin@budgetbuddy.local",
+            ]
+            await seed_session.execute(delete(models.User).where(models.User.email.in_(demo_emails)))
+            await seed_session.commit()
     except Exception as exc:
         print("Database auto-init error:", exc)
 

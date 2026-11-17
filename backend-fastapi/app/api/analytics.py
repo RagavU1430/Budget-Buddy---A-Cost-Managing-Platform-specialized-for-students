@@ -278,7 +278,7 @@ async def _trend_row(
         "month_label": first.strftime("%b %Y"),
         "income": _or_zero_number(income),
         "expense": _or_zero_number(expense),
-        "net": _rows_sum_to_float(Decimal(income) - Decimal(expense)) if (income or expense) else 0,
+        "net": _rows_sum_to_float(Decimal(income or 0) - Decimal(expense or 0)) if (income or expense) else 0,
         "budget": _or_zero_number(budget),
     }
 

@@ -2,13 +2,15 @@ import { useState } from 'react'
 import {
   ArrowRight,
   CheckCircle2,
+  Database,
   Eye,
   EyeOff,
   Lock,
   Mail,
+  PieChart,
+  ShieldCheck,
   Sparkles,
   Wallet,
-  Zap,
 } from 'lucide-react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 
@@ -30,11 +32,6 @@ export default function Login() {
   const handleChange = (event) => {
     const { name, value } = event.target
     setForm((current) => ({ ...current, [name]: value }))
-  }
-
-  const fillDemoRole = (email, password = 'Password123!') => {
-    setForm({ email, password })
-    setError('')
   }
 
   const handleSubmit = async (event) => {
@@ -64,7 +61,7 @@ export default function Login() {
       />
 
       <div className="relative mx-auto grid w-full max-w-4xl items-center gap-10 lg:grid-cols-12">
-        {/* Left Side: Brand & Quick Demo showcase */}
+        {/* Left Side: Brand & Value Props */}
         <div className="hidden lg:col-span-5 lg:flex lg:flex-col lg:justify-between space-y-8">
           <div>
             <div className="inline-flex items-center gap-2 rounded-full border border-accent/30 bg-accent-soft px-3.5 py-1 text-xs font-semibold text-accent shadow-sm">
@@ -81,67 +78,42 @@ export default function Login() {
             </p>
           </div>
 
-          {/* Quick Demo Credentials Panel */}
-          <div className="rounded-2xl border border-line bg-surface/70 p-5 backdrop-blur-md">
-            <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-accent">
-              <Zap className="h-4 w-4" />
-              <span>1-Click Demo Login</span>
+          {/* Features Highlights */}
+          <div className="rounded-2xl border border-line bg-surface/70 p-5 backdrop-blur-md space-y-3.5">
+            <div className="flex items-start gap-3">
+              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-accent-soft text-accent">
+                <Database className="h-4 w-4" />
+              </div>
+              <div>
+                <div className="text-xs font-semibold text-fg">Supabase Cloud Database</div>
+                <div className="text-[11px] text-fg-muted">Real-time persistent PostgreSQL storage for all your financial records</div>
+              </div>
             </div>
-            <p className="mt-1 text-xs text-fg-muted">
-              Choose a role below to auto-fill verified test credentials:
-            </p>
 
-            <div className="mt-4 grid grid-cols-1 gap-2.5">
-              <button
-                type="button"
-                onClick={() => fillDemoRole('student@budgetbuddy.local')}
-                className="group flex items-center justify-between rounded-xl border border-info/30 bg-info-soft/30 p-2.5 text-left transition-all hover:bg-info-soft/60 hover:border-info cursor-pointer"
-              >
-                <div className="flex items-center gap-2.5">
-                  <span className="text-lg">🎓</span>
-                  <div>
-                    <div className="text-xs font-semibold text-fg">Student Role</div>
-                    <div className="text-[11px] text-fg-muted">student@budgetbuddy.local</div>
-                  </div>
-                </div>
-                <span className="text-[11px] font-medium text-info group-hover:underline">Fill &rarr;</span>
-              </button>
+            <div className="flex items-start gap-3">
+              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-info-soft text-info">
+                <PieChart className="h-4 w-4" />
+              </div>
+              <div>
+                <div className="text-xs font-semibold text-fg">Smart Budgeting & Caps</div>
+                <div className="text-[11px] text-fg-muted">Track monthly expenses against custom category limits</div>
+              </div>
+            </div>
 
-              <button
-                type="button"
-                onClick={() => fillDemoRole('premium@budgetbuddy.local')}
-                className="group flex items-center justify-between rounded-xl border border-warn/30 bg-warn-soft/30 p-2.5 text-left transition-all hover:bg-warn-soft/60 hover:border-warn cursor-pointer"
-              >
-                <div className="flex items-center gap-2.5">
-                  <span className="text-lg">⭐</span>
-                  <div>
-                    <div className="text-xs font-semibold text-fg">Premium Role</div>
-                    <div className="text-[11px] text-fg-muted">premium@budgetbuddy.local</div>
-                  </div>
-                </div>
-                <span className="text-[11px] font-medium text-warn group-hover:underline">Fill &rarr;</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => fillDemoRole('admin@budgetbuddy.local')}
-                className="group flex items-center justify-between rounded-xl border border-accent/30 bg-accent-soft/30 p-2.5 text-left transition-all hover:bg-accent-soft/60 hover:border-accent cursor-pointer"
-              >
-                <div className="flex items-center gap-2.5">
-                  <span className="text-lg">🛡️</span>
-                  <div>
-                    <div className="text-xs font-semibold text-fg">Admin Role</div>
-                    <div className="text-[11px] text-fg-muted">admin@budgetbuddy.local</div>
-                  </div>
-                </div>
-                <span className="text-[11px] font-medium text-accent group-hover:underline">Fill &rarr;</span>
-              </button>
+            <div className="flex items-start gap-3">
+              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-warn-soft text-warn">
+                <ShieldCheck className="h-4 w-4" />
+              </div>
+              <div>
+                <div className="text-xs font-semibold text-fg">Secure Auth & Privacy</div>
+                <div className="text-[11px] text-fg-muted">Encrypted password hashing with automated JWT session renewal</div>
+              </div>
             </div>
           </div>
 
           <div className="flex items-center gap-2 text-xs text-fg-faint">
             <CheckCircle2 className="h-4 w-4 text-accent" />
-            <span>Encrypted sessions with automated JWT renewal</span>
+            <span>Connected to Production Supabase Database</span>
           </div>
         </div>
 
@@ -159,7 +131,7 @@ export default function Login() {
               </div>
               <span className="flex items-center gap-1.5 rounded-full border border-line bg-surface/60 px-3 py-1 text-xs font-medium text-accent">
                 <span className="h-2 w-2 rounded-full bg-accent animate-pulse" />
-                Live API
+                Live Cloud API
               </span>
             </div>
 
@@ -170,36 +142,6 @@ export default function Login() {
               <p className="mt-1 text-sm text-fg-muted">
                 Enter your credentials to access your financial dashboard.
               </p>
-            </div>
-
-            {/* Mobile quick demo selector */}
-            <div className="mt-5 block lg:hidden">
-              <p className="text-xs font-semibold uppercase tracking-wider text-accent mb-2">
-                Quick Demo Accounts
-              </p>
-              <div className="grid grid-cols-3 gap-2">
-                <button
-                  type="button"
-                  onClick={() => fillDemoRole('student@budgetbuddy.local')}
-                  className="rounded-xl border border-info/30 bg-info-soft/30 p-2 text-center text-xs text-info hover:bg-info-soft"
-                >
-                  🎓 Student
-                </button>
-                <button
-                  type="button"
-                  onClick={() => fillDemoRole('premium@budgetbuddy.local')}
-                  className="rounded-xl border border-warn/30 bg-warn-soft/30 p-2 text-center text-xs text-warn hover:bg-warn-soft"
-                >
-                  ⭐ Premium
-                </button>
-                <button
-                  type="button"
-                  onClick={() => fillDemoRole('admin@budgetbuddy.local')}
-                  className="rounded-xl border border-accent/30 bg-accent-soft/30 p-2 text-center text-xs text-accent hover:bg-accent-soft"
-                >
-                  🛡️ Admin
-                </button>
-              </div>
             </div>
 
             <form className="mt-6 flex flex-col gap-4" onSubmit={handleSubmit}>
@@ -214,7 +156,7 @@ export default function Login() {
                     type="email"
                     required
                     autoComplete="email"
-                    placeholder="student@budgetbuddy.local"
+                    placeholder="you@example.com"
                     className={`${inputClass} pl-10`}
                     value={form.email}
                     onChange={handleChange}

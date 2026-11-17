@@ -35,14 +35,20 @@ async def lifespan(app: FastAPI):
     except Exception:
         pass
 
-    # Automatically initialize tables and baseline seed if needed
+    # Automatically initialize tables in production Supabase / Postgres
     try:
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
         from app.db.session import SessionLocal
-        from app.scripts.seed_demo_users import auto_seed_if_empty
-        async with SessionLocal() as seed_session:
-            await auto_seed_if_empty(seed_session)
+        from sqlalchemy import delete
+        async with SessionLocal() as session:
+            demo_emails = [
+                "student@budgetbuddy.local",
+                "premium@budgetbuddy.local",
+                "admin@budgetbuddy.local",
+            ]
+            await session.execute(delete(models.User).where(models.User.email.in_(demo_emails)))
+            await session.commit()
     except Exception:
         pass
 

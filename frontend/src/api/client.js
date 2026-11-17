@@ -20,7 +20,12 @@ api.interceptors.request.use((config) => {
     config.url = config.url.replace('/api/', '/')
   }
   const access = localStorage.getItem(TOKEN_KEYS.access)
-  if (access) {
+  if (
+    access &&
+    !config.url?.includes('/auth/refresh') &&
+    !config.url?.includes('/auth/login') &&
+    !config.url?.includes('/auth/register')
+  ) {
     config.headers.Authorization = `Bearer ${access}`
   }
   return config
