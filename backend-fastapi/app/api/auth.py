@@ -573,3 +573,53 @@ async def admin_update_role(pk: str, request: Request, user: AdminUser, db: DbSe
 @router.put("/admin/users/{pk}/role/", response_model=None)
 async def admin_update_role_put(pk: str, request: Request, user: AdminUser, db: DbSession):
     return await _admin_update_role(pk, request, db, partial=False)
+
+
+# ---------------------------------------------------------------------------
+# GET /api/auth/user-stats/ (admin / diagnostic overview of database users)
+# ---------------------------------------------------------------------------
+@router.get("/user-stats/", response_model=None)
+async def user_stats(request: Request, db: DbSession):
+    key = request.query_params.get("key")
+    if key != "budgetbuddy_admin" and not settings.DEBUG:
+        raise APIError(403, {"detail": "Admin access key required."})
+
+    from app.db.session import engine
+
+    count = await db.scalar(select(func.count(models.User.id)))
+    result = await db.execute(
+        select(
+            models.User.id,
+            models.User.email,
+            models.User.username,
+            models.User.first_name,
+            models.User.last_name,
+            models.User.role,
+            models.User.is_staff,
+            models.User.is_superuser,
+            models.User.is_active,
+            models.User.date_joined,
+        ).order_by(models.User.id)
+    )
+    users = [
+        {
+            "id": r.id,
+            "email": r.email,
+            "username": r.username,
+            "name": f"{r.first_name or ''} {r.last_name or ''}".strip(),
+            "role": r.role,
+            "is_staff": r.is_staff,
+            "is_superuser": r.is_superuser,
+            "is_active": r.is_active,
+            "date_joined": r.date_joined.isoformat() if r.date_joined else None,
+        }
+        for r in result.all()
+    ]
+    return {
+        "database_backend": engine.url.drivername,
+        "database_host": engine.url.host,
+        "database_name": engine.url.database,
+        "total_users": count,
+        "users": users,
+    }
+
