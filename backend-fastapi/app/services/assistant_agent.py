@@ -490,6 +490,15 @@ async def handle_pending_action(
     q_lower = q.lower()
     cleaned_q = re.sub(r"[^\w\s]", " ", q_lower)
 
+    # 1. Check for greetings - greetings should never be trapped in a pending action loop
+    greetings = {
+        "hi", "hello", "hey", "hola", "greetings", "good morning",
+        "good evening", "good afternoon", "yo", "sup", "heya", "start over",
+    }
+    if q_lower in greetings or any(q_lower.startswith(w + " ") for w in greetings):
+        await clear_pending_action(db, user)
+        return None
+
     if any(
         q_lower.startswith(word)
         for word in [
@@ -545,13 +554,15 @@ async def handle_pending_action(
             elif "misc" in cleaned_q or "other" in cleaned_q:
                 matched_cat = "misc"
 
+        new_amt = _extract_amount(q_lower)
         amount: Decimal | None
         if pending.get("amount"):
             amount = Decimal(str(pending["amount"]))
         else:
-            amount = _extract_amount(q_lower)
+            amount = new_amt
 
-        if not matched_cat and not amount:
+        if not matched_cat and not new_amt:
+            await clear_pending_action(db, user)
             return None
 
         if matched_cat and not amount:
@@ -613,13 +624,15 @@ async def handle_pending_action(
             elif "other" in cleaned_q:
                 matched_source = "other"
 
+        new_amt = _extract_amount(q_lower)
         amount = None
         if pending.get("amount"):
             amount = Decimal(str(pending["amount"]))
         else:
-            amount = _extract_amount(q_lower)
+            amount = new_amt
 
-        if not matched_source and not amount:
+        if not matched_source and not new_amt:
+            await clear_pending_action(db, user)
             return None
 
         if matched_source and not amount:

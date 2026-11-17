@@ -271,15 +271,17 @@ async def _trend_row(
     ).scalar_one()
 
     first = date(year, month, 1)
-    income_value = _or_zero_number(income)  # -> ``or 0`` semantics
-    budget_value = _or_zero_number(budget)
+    income_val = Decimal(str(income)) if income is not None else Decimal("0")
+    expense_val = Decimal(str(expense)) if expense is not None else Decimal("0")
+    budget_val = Decimal(str(budget)) if budget is not None else Decimal("0")
+    net_val = income_val - expense_val
     return {
         "month": first.isoformat(),
         "month_label": first.strftime("%b %Y"),
-        "income": _or_zero_number(income),
-        "expense": _or_zero_number(expense),
-        "net": _rows_sum_to_float(Decimal(income or 0) - Decimal(expense or 0)) if (income or expense) else 0,
-        "budget": _or_zero_number(budget),
+        "income": float(income_val),
+        "expense": float(expense_val),
+        "net": float(net_val),
+        "budget": float(budget_val),
     }
 
 

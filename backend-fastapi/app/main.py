@@ -83,6 +83,17 @@ async def api_error_handler(request: Request, exc: APIError):
     return JSONResponse(status_code=exc.status_code, content=exc.body)
 
 
+# Catch-all exception handler to ensure CORS headers are preserved on unhandled errors
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    import traceback
+    traceback.print_exc()
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "An internal server error occurred.", "error": str(exc)},
+    )
+
+
 # Normalize serverless paths (if deployment platform strips /api prefix)
 @app.middleware("http")
 async def normalize_api_path(request: Request, call_next):
