@@ -34,44 +34,42 @@ async def apply_database_security_hardening(conn: AsyncConnection) -> dict[str, 
         }
 
     # 0. Ensure all modern auth and security tables exist before scanning
-    await conn.execute(
-        text(
-            """
-            CREATE TABLE IF NOT EXISTS public.email_change_requests (
-                id BIGSERIAL PRIMARY KEY,
-                user_id BIGINT NOT NULL UNIQUE REFERENCES public.users(id) ON DELETE CASCADE,
-                new_email VARCHAR(254) NOT NULL,
-                otp_hash VARCHAR(64) NOT NULL,
-                expires_at TIMESTAMPTZ NOT NULL,
-                attempts INTEGER NOT NULL DEFAULT 0,
-                created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
-            );
-
-            CREATE TABLE IF NOT EXISTS public.email_change_history (
-                id BIGSERIAL PRIMARY KEY,
-                user_id BIGINT NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
-                old_email VARCHAR(254) NOT NULL,
-                new_email VARCHAR(254) NOT NULL,
-                changed_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
-            );
-
-            CREATE TABLE IF NOT EXISTS public.refresh_tokens (
-                id BIGSERIAL PRIMARY KEY,
-                jti VARCHAR(64) NOT NULL UNIQUE,
-                user_id BIGINT NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
-                expires_at TIMESTAMPTZ NOT NULL,
-                created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
-            );
-
-            CREATE INDEX IF NOT EXISTS ix_email_change_request_user ON public.email_change_requests(user_id);
-            CREATE INDEX IF NOT EXISTS ix_email_change_request_expires ON public.email_change_requests(expires_at);
-            CREATE INDEX IF NOT EXISTS ix_email_change_history_user_changed ON public.email_change_history(user_id, changed_at);
-            CREATE INDEX IF NOT EXISTS ix_refresh_token_jti ON public.refresh_tokens(jti);
-            CREATE INDEX IF NOT EXISTS ix_refresh_token_user_expires ON public.refresh_tokens(user_id, expires_at);
-            """
-        )
-    )
+    ddl_statements = [
+        """CREATE TABLE IF NOT EXISTS public.email_change_requests (
+            id BIGSERIAL PRIMARY KEY,
+            user_id BIGINT NOT NULL UNIQUE REFERENCES public.users(id) ON DELETE CASCADE,
+            new_email VARCHAR(254) NOT NULL,
+            otp_hash VARCHAR(64) NOT NULL,
+            expires_at TIMESTAMPTZ NOT NULL,
+            attempts INTEGER NOT NULL DEFAULT 0,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )""",
+        """CREATE TABLE IF NOT EXISTS public.email_change_history (
+            id BIGSERIAL PRIMARY KEY,
+            user_id BIGINT NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+            old_email VARCHAR(254) NOT NULL,
+            new_email VARCHAR(254) NOT NULL,
+            changed_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )""",
+        """CREATE TABLE IF NOT EXISTS public.refresh_tokens (
+            id BIGSERIAL PRIMARY KEY,
+            jti VARCHAR(64) NOT NULL UNIQUE,
+            user_id BIGINT NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+            expires_at TIMESTAMPTZ NOT NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )""",
+        "CREATE INDEX IF NOT EXISTS ix_email_change_request_user ON public.email_change_requests(user_id)",
+        "CREATE INDEX IF NOT EXISTS ix_email_change_request_expires ON public.email_change_requests(expires_at)",
+        "CREATE INDEX IF NOT EXISTS ix_email_change_history_user_changed ON public.email_change_history(user_id, changed_at)",
+        "CREATE INDEX IF NOT EXISTS ix_refresh_token_jti ON public.refresh_tokens(jti)",
+        "CREATE INDEX IF NOT EXISTS ix_refresh_token_user_expires ON public.refresh_tokens(user_id, expires_at)",
+    ]
+    for stmt in ddl_statements:
+        try:
+            await conn.execute(text(stmt))
+        except Exception as stmt_exc:
+            logger.warning(f"[SecurityFix] DDL statement notice: {stmt_exc}")
 
     # 1. Fetch all tables currently in the public schema
     res = await conn.execute(

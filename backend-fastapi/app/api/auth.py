@@ -25,6 +25,9 @@ from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any
+import logging
+
+logger = logging.getLogger("budgetbuddy.auth")
 
 import jwt
 from fastapi import APIRouter, Request
@@ -631,54 +634,53 @@ def _otp_hash(code: str) -> str:
     ).hexdigest()
 
 
+TABLE_DDL_STATEMENTS = [
+    """CREATE TABLE IF NOT EXISTS public.email_change_requests (
+        id BIGSERIAL PRIMARY KEY,
+        user_id BIGINT NOT NULL UNIQUE REFERENCES public.users(id) ON DELETE CASCADE,
+        new_email VARCHAR(254) NOT NULL,
+        otp_hash VARCHAR(64) NOT NULL,
+        expires_at TIMESTAMPTZ NOT NULL,
+        attempts INTEGER NOT NULL DEFAULT 0,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )""",
+    """CREATE TABLE IF NOT EXISTS public.email_change_history (
+        id BIGSERIAL PRIMARY KEY,
+        user_id BIGINT NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+        old_email VARCHAR(254) NOT NULL,
+        new_email VARCHAR(254) NOT NULL,
+        changed_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )""",
+    """CREATE TABLE IF NOT EXISTS public.refresh_tokens (
+        id BIGSERIAL PRIMARY KEY,
+        jti VARCHAR(64) NOT NULL UNIQUE,
+        user_id BIGINT NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+        expires_at TIMESTAMPTZ NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )""",
+    "CREATE INDEX IF NOT EXISTS ix_email_change_request_user ON public.email_change_requests(user_id)",
+    "CREATE INDEX IF NOT EXISTS ix_email_change_request_expires ON public.email_change_requests(expires_at)",
+    "CREATE INDEX IF NOT EXISTS ix_email_change_history_user_changed ON public.email_change_history(user_id, changed_at)",
+    "CREATE INDEX IF NOT EXISTS ix_refresh_token_jti ON public.refresh_tokens(jti)",
+    "CREATE INDEX IF NOT EXISTS ix_refresh_token_user_expires ON public.refresh_tokens(user_id, expires_at)",
+    "ALTER TABLE public.email_change_requests ENABLE ROW LEVEL SECURITY",
+    "ALTER TABLE public.email_change_history ENABLE ROW LEVEL SECURITY",
+    "ALTER TABLE public.refresh_tokens ENABLE ROW LEVEL SECURITY",
+]
+
+
 async def _ensure_email_change_tables(db: DbSession) -> None:
     """Auto-heal missing schema tables (email_change_requests, email_change_history, refresh_tokens)."""
     try:
         from sqlalchemy import text
         conn = await db.connection()
         if conn.dialect.name == "postgresql":
-            await db.execute(
-                text(
-                    """
-                    CREATE TABLE IF NOT EXISTS public.email_change_requests (
-                        id BIGSERIAL PRIMARY KEY,
-                        user_id BIGINT NOT NULL UNIQUE REFERENCES public.users(id) ON DELETE CASCADE,
-                        new_email VARCHAR(254) NOT NULL,
-                        otp_hash VARCHAR(64) NOT NULL,
-                        expires_at TIMESTAMPTZ NOT NULL,
-                        attempts INTEGER NOT NULL DEFAULT 0,
-                        created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                        updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
-                    );
-
-                    CREATE TABLE IF NOT EXISTS public.email_change_history (
-                        id BIGSERIAL PRIMARY KEY,
-                        user_id BIGINT NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
-                        old_email VARCHAR(254) NOT NULL,
-                        new_email VARCHAR(254) NOT NULL,
-                        changed_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
-                    );
-
-                    CREATE TABLE IF NOT EXISTS public.refresh_tokens (
-                        id BIGSERIAL PRIMARY KEY,
-                        jti VARCHAR(64) NOT NULL UNIQUE,
-                        user_id BIGINT NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
-                        expires_at TIMESTAMPTZ NOT NULL,
-                        created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
-                    );
-
-                    CREATE INDEX IF NOT EXISTS ix_email_change_request_user ON public.email_change_requests(user_id);
-                    CREATE INDEX IF NOT EXISTS ix_email_change_request_expires ON public.email_change_requests(expires_at);
-                    CREATE INDEX IF NOT EXISTS ix_email_change_history_user_changed ON public.email_change_history(user_id, changed_at);
-                    CREATE INDEX IF NOT EXISTS ix_refresh_token_jti ON public.refresh_tokens(jti);
-                    CREATE INDEX IF NOT EXISTS ix_refresh_token_user_expires ON public.refresh_tokens(user_id, expires_at);
-
-                    ALTER TABLE public.email_change_requests ENABLE ROW LEVEL SECURITY;
-                    ALTER TABLE public.email_change_history ENABLE ROW LEVEL SECURITY;
-                    ALTER TABLE public.refresh_tokens ENABLE ROW LEVEL SECURITY;
-                    """
-                )
-            )
+            for stmt in TABLE_DDL_STATEMENTS:
+                try:
+                    await db.execute(text(stmt))
+                except Exception as stmt_exc:
+                    logger.warning(f"DDL execution notice: {stmt_exc}")
             await db.commit()
         else:
             from app.db.base import Base
