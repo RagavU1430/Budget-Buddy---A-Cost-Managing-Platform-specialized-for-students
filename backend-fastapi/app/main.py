@@ -70,10 +70,22 @@ app.add_middleware(
 )
 
 
+def _cors_headers(request: Request) -> dict[str, str]:
+    origin = request.headers.get("origin")
+    if origin:
+        return {
+            "Access-Control-Allow-Origin": origin,
+            "Access-Control-Allow-Credentials": "true",
+            "Access-Control-Allow-Methods": "*",
+            "Access-Control-Allow-Headers": "*",
+        }
+    return {}
+
+
 # Exception handler for DRF parity error payloads
 @app.exception_handler(APIError)
 async def api_error_handler(request: Request, exc: APIError):
-    return JSONResponse(status_code=exc.status_code, content=exc.body)
+    return JSONResponse(status_code=exc.status_code, content=exc.body, headers=_cors_headers(request))
 
 
 # Catch-all exception handler to ensure CORS headers are preserved on unhandled errors
@@ -84,6 +96,7 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
     return JSONResponse(
         status_code=500,
         content={"detail": "An internal server error occurred.", "error": str(exc)},
+        headers=_cors_headers(request),
     )
 
 

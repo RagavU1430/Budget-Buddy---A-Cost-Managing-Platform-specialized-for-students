@@ -16,6 +16,7 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     Index,
+    Integer,
     JSON,
     Numeric,
     String,
@@ -221,6 +222,43 @@ class SavingsGoal(TimestampMixin, Base):
     def sync_completion(self) -> bool:
         self.is_completed = Decimal(self.current_amount or 0) >= Decimal(self.target_amount or 0)
         return self.is_completed
+
+
+class EmailChangeRequest(TimestampMixin, Base):
+    __tablename__ = "email_change_requests"
+    __table_args__ = (
+        Index("ix_email_change_request_user", "user_id"),
+        Index("ix_email_change_request_expires", "expires_at"),
+    )
+
+    id: Mapped[int] = mapped_column(BigPK, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE", name="email_change_request_user_id_fk"),
+        unique=True,
+        nullable=False,
+    )
+    new_email: Mapped[str] = mapped_column(String(254), nullable=False)
+    otp_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+
+class EmailChangeHistory(Base):
+    __tablename__ = "email_change_history"
+    __table_args__ = (
+        Index("ix_email_change_history_user_changed", "user_id", "changed_at"),
+    )
+
+    id: Mapped[int] = mapped_column(BigPK, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE", name="email_change_history_user_id_fk"),
+        nullable=False,
+    )
+    old_email: Mapped[str] = mapped_column(String(254), nullable=False)
+    new_email: Mapped[str] = mapped_column(String(254), nullable=False)
+    changed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utcnow, index=True
+    )
 
 
 class Notification(Base):

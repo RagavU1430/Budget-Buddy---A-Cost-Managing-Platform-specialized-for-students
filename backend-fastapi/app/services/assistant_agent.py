@@ -29,6 +29,8 @@ from app.services.assistant_guardrails import sanitize_output
 from app.services.notifications import (
     budget_alert_for_expense,
     check_budget_alerts,
+    record_expense_notification,
+    record_income_notification,
     utc_today,
 )
 
@@ -74,26 +76,12 @@ ASSISTANT_NOTE = "Logged via BudgetBuddy AI Assistant"
 # Pending multi-turn actions
 # ---------------------------------------------------------------------------
 async def get_pending_action(db: AsyncSession, user: models.User) -> dict[str, Any] | None:
-    """Retrieve any active multi-turn pending action for the user."""
+    """Retrieve active multi-turn pending action strictly from user preferences."""
     profile = user.profile
     if profile is not None and isinstance(profile.financial_preferences, dict):
         pending = profile.financial_preferences.get("pending_assistant_action")
-        if pending:
+        if pending and isinstance(pending, dict):
             return pending
-
-    last_bot_message = (
-        await db.execute(
-            select(models.ChatMessage)
-            .where(
-                models.ChatMessage.user_id == user.id,
-                models.ChatMessage.role == "assistant",
-            )
-            .order_by(models.ChatMessage.created_at.desc())
-            .limit(1)
-        )
-    ).scalars().first()
-    if last_bot_message is not None and last_bot_message.action_type == "pending_category_clarification":
-        return last_bot_message.action_data
     return None
 
 
@@ -430,6 +418,7 @@ async def _create_expense(
     await db.flush()
     await budget_alert_for_expense(db, user, expense)
     await check_budget_alerts(db, user)
+    await record_expense_notification(db, user, expense)
     return expense
 
 
@@ -452,6 +441,7 @@ async def _create_income(
     )
     db.add(income)
     await db.flush()
+    await record_income_notification(db, user, income)
     return income
 
 
@@ -1056,6 +1046,20 @@ async def try_action_dispatch(
     return None
 
 
+def _is_greeting(text: str) -> bool:
+    cleaned = re.sub(r"[^\w\s]", " ", text.strip().lower()).strip()
+    words = cleaned.split()
+    if not words:
+        return False
+    greeting_phrases = {
+        "hi", "hello", "hey", "hola", "yo", "sup", "heya", "greetings",
+        "good morning", "good evening", "good afternoon", "good day",
+        "hey there", "hi there", "hello there", "start over", "restart",
+    }
+    greeting_words = {"hi", "hello", "hey", "hola", "yo", "sup", "heya"}
+    return cleaned in greeting_phrases or (words[0] in greeting_words and len(words) <= 3)
+
+
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
@@ -1063,6 +1067,25 @@ async def generate_assistant_response(
     db: AsyncSession, user: models.User, query: str
 ) -> tuple[str, str, dict[str, Any]]:
     """Generate a reply, with clean formatting and output sanitisation."""
+    # 0. Check for greetings upfront — immediately clears any pending actions and greets the user
+    if _is_greeting(query):
+        await clear_pending_action(db, user)
+        context = await build_user_finance_context(db, user)
+        sym = context["curr_sym"]
+        name = user.first_name or user.username or "there"
+        reply = (
+            f"👋 Hi {name}! Welcome to BudgetBuddy AI.\n\n"
+            f"Here is your financial snapshot for {context['current_month']}:\n"
+            f"• Total Spent: {sym}{context['total_expense']:,.2f}\n"
+            f"• Remaining Budget: {sym}{context['remaining_budget']:,.2f}\n"
+            f"• Safe Daily Spend: {sym}{context['safe_daily_spend']:,.2f} / day\n\n"
+            "How can I help you today? You can ask me questions about your finances, or log transactions directly:\n"
+            "• 'Spent 150 on food'\n"
+            "• 'Received 5000 pocket money'\n"
+            "• 'What is my safe daily spending rate?'"
+        )
+        return (sanitize_output(strip_markdown_stars(reply)), "greeting", {})
+
     pending = await get_pending_action(db, user)
     if pending:
         handled = await handle_pending_action(db, user, query, pending)

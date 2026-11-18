@@ -19,14 +19,14 @@ export default function Analytics() {
 
   const loadData = () => {
     setLoading(true)
-    Promise.all([getMonthlySummary(month), getMonthlyTrends(6)])
-      .then(([summaryResponse, trendResponse]) => {
-        setSummary(summaryResponse.data)
-        setTrends(normalize(trendResponse.data))
-      })
-      .catch(() => {
-        setSummary(null)
-        setTrends([])
+    Promise.allSettled([getMonthlySummary(month), getMonthlyTrends(6)])
+      .then(([summaryResult, trendResult]) => {
+        if (summaryResult.status === 'fulfilled') {
+          setSummary(summaryResult.value.data)
+        }
+        if (trendResult.status === 'fulfilled') {
+          setTrends(normalize(trendResult.value.data))
+        }
       })
       .finally(() => setLoading(false))
   }
@@ -100,15 +100,28 @@ export default function Analytics() {
           <h2 className="mt-1 text-lg font-semibold">{stat.month || month}</h2>
           <div className="mt-5 space-y-4">
             {(stat.category_breakdown || []).length ? (
-              stat.category_breakdown.map((item) => (
-                <div key={item.category}>
-                  <div className="mb-1 flex justify-between text-sm">
-                    <span className="capitalize text-fg-muted">{item.category.replaceAll('_', ' ')}</span>
-                    <span className="data">{formatCurrency(item.spent)}</span>
+              stat.category_breakdown.map((item) => {
+                const hasBudget = Number(item.budget_limit) > 0
+                const progressValue = hasBudget ? (item.utilization_pct || 0) : (item.share_pct || 0)
+                const sublabel = hasBudget
+                  ? `${Math.round(item.utilization_pct || 0)}% of budget`
+                  : item.spent > 0
+                  ? `${Math.round(item.share_pct || 0)}% of spend`
+                  : '0%'
+
+                return (
+                  <div key={item.category}>
+                    <div className="mb-1 flex items-center justify-between text-sm">
+                      <div className="flex items-center gap-1.5 overflow-hidden pr-2">
+                        <span className="capitalize text-fg font-medium">{item.category.replaceAll('_', ' ')}</span>
+                        <span className="text-xs text-fg-muted">({sublabel})</span>
+                      </div>
+                      <span className="data font-semibold text-fg whitespace-nowrap">{formatCurrency(item.spent)}</span>
+                    </div>
+                    <ProgressBar value={progressValue} />
                   </div>
-                  <ProgressBar value={item.utilization_pct} />
-                </div>
-              ))
+                )
+              })
             ) : (
               <p className="py-8 text-sm text-fg-muted">No category spending recorded.</p>
             )}
@@ -120,12 +133,15 @@ export default function Analytics() {
         <section className="glass rounded-[var(--radius-card)] p-5">
           <p className="label text-accent">Payment methods</p>
           <div className="mt-4 space-y-3">
-            {(stat.payment_method_breakdown || []).map((item) => (
-              <div key={item.method} className="flex justify-between text-sm">
-                <span className="capitalize text-fg-muted">{item.method}</span>
-                <span className="data">{formatCurrency(item.total)}</span>
-              </div>
-            ))}
+            {(stat.payment_method_breakdown || []).map((item) => {
+              const methodName = item.payment_method || item.method || 'cash'
+              return (
+                <div key={methodName} className="flex justify-between text-sm">
+                  <span className="capitalize text-fg-muted">{methodName}</span>
+                  <span className="data font-medium">{formatCurrency(item.total)}</span>
+                </div>
+              )
+            })}
           </div>
         </section>
         <section className="glass rounded-[var(--radius-card)] p-5">

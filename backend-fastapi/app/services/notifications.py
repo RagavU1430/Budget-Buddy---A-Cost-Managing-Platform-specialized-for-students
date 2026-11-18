@@ -22,6 +22,12 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import models
+from app.services.email import (
+    notify_expense_created,
+    notify_income_created,
+    notify_goal_created,
+    notify_goal_deposit,
+)
 
 
 def utc_today() -> date:
@@ -176,3 +182,119 @@ async def create_goal_completed_notification(
         title=f"Goal completed: {goal.title}",
         message=f"You reached your savings goal of {goal.target_amount}.",
     )
+
+
+async def record_expense_notification(
+    db: AsyncSession, user: models.User, expense: models.Expense
+) -> None:
+    """Record in-app notification and dispatch email to user's login Gmail."""
+    date_str = expense.date.strftime("%d %b %Y") if hasattr(expense.date, "strftime") else str(expense.date)
+    user_name = user.first_name or user.username or "Student"
+    cat_label = models.CATEGORY_LABELS.get(expense.category, expense.category.capitalize())
+
+    # 1. In-app notification
+    notification = models.Notification(
+        user_id=user.id,
+        notification_type="expense",
+        title=f"Spent ₹{expense.amount:,.2f} on {cat_label}",
+        message=f"Expense '{expense.title}' of ₹{expense.amount:,.2f} was recorded on {date_str}.",
+    )
+    db.add(notification)
+
+    # 2. Asynchronous email alert to login Gmail
+    if user.email:
+        notify_expense_created(
+            user_email=user.email,
+            user_name=user_name,
+            title=expense.title,
+            amount=expense.amount,
+            category=expense.category,
+            date_str=date_str,
+            payment_method=getattr(expense, "payment_method", "cash"),
+        )
+
+
+async def record_income_notification(
+    db: AsyncSession, user: models.User, income: models.Income
+) -> None:
+    """Record in-app notification and dispatch email to user's login Gmail."""
+    date_str = income.date.strftime("%d %b %Y") if hasattr(income.date, "strftime") else str(income.date)
+    user_name = user.first_name or user.username or "Student"
+    source_label = models.SOURCE_LABELS.get(income.source_type, income.source_type.replace("_", " ").title())
+
+    # 1. In-app notification
+    notification = models.Notification(
+        user_id=user.id,
+        notification_type="income",
+        title=f"Received ₹{income.amount:,.2f} ({source_label})",
+        message=f"Income '{income.title}' of ₹{income.amount:,.2f} was added on {date_str}.",
+    )
+    db.add(notification)
+
+    # 2. Asynchronous email alert to login Gmail
+    if user.email:
+        notify_income_created(
+            user_email=user.email,
+            user_name=user_name,
+            title=income.title,
+            amount=income.amount,
+            source_type=income.source_type,
+            date_str=date_str,
+        )
+
+
+async def record_goal_created_notification(
+    db: AsyncSession, user: models.User, goal: models.SavingsGoal
+) -> None:
+    """Record in-app notification and dispatch email when a new goal is set."""
+    user_name = user.first_name or user.username or "Student"
+    deadline_str = goal.target_date.strftime("%d %b %Y") if goal.target_date else None
+
+    # 1. In-app notification
+    notification = models.Notification(
+        user_id=user.id,
+        notification_type="goal",
+        title=f"New Goal: {goal.title}",
+        message=f"Target: ₹{goal.target_amount:,.2f}. Target date: {deadline_str or 'No deadline'}.",
+    )
+    db.add(notification)
+
+    # 2. Email alert
+    if user.email:
+        notify_goal_created(
+            user_email=user.email,
+            user_name=user_name,
+            title=goal.title,
+            target_amount=goal.target_amount,
+            priority=goal.priority,
+            target_date_str=deadline_str,
+        )
+
+
+async def record_goal_deposit_notification(
+    db: AsyncSession, user: models.User, goal: models.SavingsGoal, deposit_amount: Any
+) -> None:
+    """Record in-app notification and dispatch email when deposit is added to a goal."""
+    user_name = user.first_name or user.username or "Student"
+
+    # 1. In-app notification
+    notification = models.Notification(
+        user_id=user.id,
+        notification_type="goal",
+        title=f"Deposited ₹{float(deposit_amount):,.2f} into {goal.title}",
+        message=f"Current saved: ₹{goal.current_amount:,.2f} / ₹{goal.target_amount:,.2f}.",
+    )
+    db.add(notification)
+
+    # 2. Email alert
+    if user.email:
+        notify_goal_deposit(
+            user_email=user.email,
+            user_name=user_name,
+            title=goal.title,
+            deposit_amount=deposit_amount,
+            current_amount=goal.current_amount,
+            target_amount=goal.target_amount,
+            is_completed=goal.is_completed,
+        )
+

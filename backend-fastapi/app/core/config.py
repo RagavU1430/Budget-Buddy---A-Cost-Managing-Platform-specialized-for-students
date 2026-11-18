@@ -98,6 +98,14 @@ class Settings(BaseSettings):
     GEMINI_MODELS: str = "models/gemini-2.5-flash,models/gemini-2.0-flash"
     GEMINI_TIMEOUT_SECONDS: float = 10.0
 
+    # Email verification
+    SMTP_HOST: str = ""
+    SMTP_PORT: int = 587
+    SMTP_USERNAME: str = ""
+    SMTP_PASSWORD: str = ""
+    SMTP_FROM_EMAIL: str = ""
+    SMTP_USE_TLS: bool = True
+
     # Storage
     STORAGE_BACKEND: str = "local"
     LOCAL_STORAGE_DIR: str = "./media"

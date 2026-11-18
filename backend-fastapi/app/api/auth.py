@@ -17,14 +17,19 @@ from __future__ import annotations
 
 import json
 import re
+import hmac
+import hashlib
+import secrets
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
 import jwt
 from fastapi import APIRouter, Request
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 
 from app.api.deps import AdminUser, CurrentUser, DbSession, json_body, parse_pk
+from app.core.config import settings
 from app.core.errors import APIError, not_found, validation_error
 from app.core.pagination import paginate
 from app.core.security import (
@@ -43,6 +48,7 @@ from app.core.validation import (
     validate_char,
     validate_password_value,
 )
+from app.services.email import send_verification_code
 from app.db import models
 
 router = APIRouter()
@@ -487,6 +493,160 @@ async def update_me(request: Request, user: CurrentUser, db: DbSession):
 async def update_me_put(request: Request, user: CurrentUser, db: DbSession):
     """The SPA only PATCHes, but DRF's RetrieveUpdateAPIView accepts both."""
     return await update_me(request, user, db)
+
+
+def _otp_hash(code: str) -> str:
+    return hmac.new(
+        settings.SECRET_KEY.encode("utf-8"),
+        code.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+
+
+@router.post("/email-change/request/", response_model=None)
+async def request_email_change(request: Request, user: CurrentUser, db: DbSession):
+    body = await json_body(request)
+    new_email = str(body.get("email") or "").strip().lower()
+
+    if not new_email:
+        raise validation_error({"email": [BLANK]})
+    email_error = _email_error(new_email)
+    if email_error:
+        raise validation_error({"email": [email_error]})
+    if new_email == str(user.email).strip().lower():
+        raise validation_error({"email": ["This is already your current email address."]})
+
+    existing = (
+        await db.execute(
+            select(models.User)
+            .where(func.lower(models.User.email) == new_email, models.User.id != user.id)
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if existing:
+        raise validation_error({"email": ["A user with this email already exists."]})
+
+    now = datetime.now(timezone.utc)
+    month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    change_count = (
+        await db.execute(
+            select(func.count(models.EmailChangeHistory.id)).where(
+                models.EmailChangeHistory.user_id == user.id,
+                models.EmailChangeHistory.changed_at >= month_start,
+            )
+        )
+    ).scalar_one()
+    if change_count >= 2:
+        raise APIError(
+            429,
+            {
+                "detail": "Email address can only be changed twice per month.",
+                "retry_after": "next month",
+            },
+        )
+
+    code = "".join(secrets.choice("0123456789") for _ in range(6))
+    await send_verification_code(new_email, code)
+
+    await db.execute(delete(models.EmailChangeRequest).where(
+        models.EmailChangeRequest.user_id == user.id
+    ))
+    db.add(models.EmailChangeRequest(
+        user_id=user.id,
+        new_email=new_email,
+        otp_hash=_otp_hash(code),
+        expires_at=now + timedelta(minutes=10),
+        attempts=0,
+    ))
+    await db.commit()
+    return {
+        "detail": "Verification code sent.",
+        "email": new_email,
+        "expires_in_seconds": 600,
+        "changes_remaining": 2 - change_count,
+    }
+
+
+@router.post("/email-change/verify/", response_model=None)
+async def verify_email_change(request: Request, user: CurrentUser, db: DbSession):
+    body = await json_body(request)
+    code = str(body.get("code") or "").strip()
+    if not re.fullmatch(r"\d{6}", code):
+        raise validation_error({"code": ["Enter a valid 6-digit verification code."]})
+
+    pending = (
+        await db.execute(
+            select(models.EmailChangeRequest).where(
+                models.EmailChangeRequest.user_id == user.id
+            )
+        )
+    ).scalar_one_or_none()
+    if pending is None:
+        raise validation_error({"code": ["No pending email change request found."]})
+
+    now = datetime.now(timezone.utc)
+    expires_at = pending.expires_at
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    if expires_at <= now:
+        await db.delete(pending)
+        await db.commit()
+        raise validation_error({"code": ["The verification code has expired."]})
+    if pending.attempts >= 5:
+        await db.delete(pending)
+        await db.commit()
+        raise validation_error({"code": ["Too many incorrect attempts. Request a new code."]})
+    if not hmac.compare_digest(pending.otp_hash, _otp_hash(code)):
+        pending.attempts += 1
+        await db.commit()
+        raise validation_error({"code": ["The verification code is incorrect."]})
+
+    existing = (
+        await db.execute(
+            select(models.User)
+            .where(func.lower(models.User.email) == pending.new_email, models.User.id != user.id)
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if existing:
+        await db.delete(pending)
+        await db.commit()
+        raise validation_error({"email": ["A user with this email already exists."]})
+
+    month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    change_count = (
+        await db.execute(
+            select(func.count(models.EmailChangeHistory.id)).where(
+                models.EmailChangeHistory.user_id == user.id,
+                models.EmailChangeHistory.changed_at >= month_start,
+            )
+        )
+    ).scalar_one()
+    if change_count >= 2:
+        await db.delete(pending)
+        await db.commit()
+        raise APIError(
+            429,
+            {"detail": "Email address can only be changed twice per month.", "retry_after": "next month"},
+        )
+
+    old_email = user.email
+    user.email = pending.new_email
+    db.add(models.EmailChangeHistory(
+        user_id=user.id,
+        old_email=old_email,
+        new_email=pending.new_email,
+        changed_at=now,
+    ))
+    await db.delete(pending)
+    await db.commit()
+    await db.refresh(user)
+
+    return {
+        **token_payload(user),
+        "detail": "Email address changed successfully.",
+        "changes_remaining": 1 - change_count,
+    }
 
 
 # ---------------------------------------------------------------------------

@@ -103,14 +103,21 @@ async def summary(request: Request, user: CurrentUser, db: DbSession):
         spent = category_spent.get(category, Decimal("0"))
         budget = budgets_by_category.get(category)
         limit = Decimal(budget.limit_amount) if budget else Decimal("0")
+        utilization_pct = (
+            round(float(spent / limit * 100), 2) if limit else 0.0
+        )
+        share_pct = (
+            round(float(spent / Decimal(total_expense) * 100), 2)
+            if total_expense and spent
+            else 0.0
+        )
         by_category.append(
             {
                 "category": category,
                 "spent": decimal_float(spent),
                 "budget_limit": decimal_float(limit),
-                "utilization_pct": (
-                    round(float(spent / limit * 100), 2) if limit else 0.0
-                ),
+                "utilization_pct": utilization_pct,
+                "share_pct": share_pct,
             }
         )
 
@@ -235,12 +242,27 @@ def _month_offsets(count: int) -> list[tuple[int, int]]:
 async def analytics_trends(request: Request, user: CurrentUser, db: DbSession):
     count = _months_param(request, 6)
     rows: list[dict[str, Any]] = []
-    for year, month in _month_offsets(count):
-        month_start = date(year, month, 1)
-        _, next_month_start = month_bounds(month_start)
-        rows.append(
-            await _trend_row(db, user, year, month, month_start, next_month_start)
-        )
+    try:
+        for year, month in _month_offsets(count):
+            month_start = date(year, month, 1)
+            _, next_month_start = month_bounds(month_start)
+            rows.append(
+                await _trend_row(db, user, year, month, month_start, next_month_start)
+            )
+    except Exception as exc:
+        import logging
+        logging.getLogger("budgetbuddy.analytics").warning("Error computing analytics trends: %s", exc)
+        if not rows:
+            for year, month in _month_offsets(count):
+                first = date(year, month, 1)
+                rows.append({
+                    "month": first.isoformat(),
+                    "month_label": first.strftime("%b %Y"),
+                    "income": 0.0,
+                    "expense": 0.0,
+                    "net": 0.0,
+                    "budget": 0.0,
+                })
     return rows
 
 

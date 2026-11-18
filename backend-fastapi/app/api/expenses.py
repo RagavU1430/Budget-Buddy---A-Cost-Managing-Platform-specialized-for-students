@@ -36,7 +36,12 @@ from app.core.validation import (
     validate_text,
 )
 from app.db import models
-from app.services.notifications import budget_alert_for_expense, check_budget_alerts
+from app.services.notifications import (
+    budget_alert_for_expense,
+    check_budget_alerts,
+    record_expense_notification,
+    record_income_notification,
+)
 
 router = APIRouter()
 
@@ -264,6 +269,7 @@ async def create_expense(request: Request, user: CurrentUser, db: DbSession):
     db.add(expense)
     await db.flush()
     await _after_expense_write(db, user, expense)
+    await record_expense_notification(db, user, expense)
     await db.commit()
     return expense_dict(expense)
 
@@ -339,6 +345,7 @@ async def create_income(request: Request, user: CurrentUser, db: DbSession):
     income = models.Income(user_id=user.id, **values)
     db.add(income)
     await db.flush()
+    await record_income_notification(db, user, income)
     await db.commit()
     return income_dict(income)
 

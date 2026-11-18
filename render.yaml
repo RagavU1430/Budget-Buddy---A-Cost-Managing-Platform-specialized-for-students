@@ -32,6 +32,21 @@ services:
         value: 'local'
       - key: DEBUG
         value: 'false'
+      - key: SMTP_HOST
+        sync: false
+        description: "SMTP server used to send email verification codes"
+      - key: SMTP_PORT
+        value: '587'
+      - key: SMTP_USERNAME
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+      - key: SMTP_FROM_EMAIL
+        sync: false
+      - key: SMTP_USE_TLS
+        value: 'true'
+      - key: AUTO_MIGRATE
+        value: 'true'
       - key: LOCAL_STORAGE_DIR
         value: '/app/media'
     autoDeploy: true

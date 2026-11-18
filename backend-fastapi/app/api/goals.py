@@ -36,7 +36,11 @@ from app.core.validation import (
     validate_decimal,
 )
 from app.db import models
-from app.services.notifications import create_goal_completed_notification
+from app.services.notifications import (
+    create_goal_completed_notification,
+    record_goal_created_notification,
+    record_goal_deposit_notification,
+)
 
 router = APIRouter()
 
@@ -180,6 +184,7 @@ async def create_goal(request: Request, user: CurrentUser, db: DbSession):
     db.add(goal)
     await db.flush()
     await create_goal_completed_notification(db, goal)  # goals.post_save port
+    await record_goal_created_notification(db, user, goal)
     await db.commit()
     return goal_dict(goal)
 
@@ -237,5 +242,6 @@ async def deposit_goal(pk: str, request: Request, user: CurrentUser, db: DbSessi
     goal.sync_completion()
     await db.flush()
     await create_goal_completed_notification(db, goal)  # goals.post_save port
+    await record_goal_deposit_notification(db, user, goal, amount)
     await db.commit()
     return goal_dict(goal)

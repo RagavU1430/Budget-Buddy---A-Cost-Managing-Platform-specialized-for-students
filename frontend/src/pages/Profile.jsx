@@ -25,8 +25,9 @@ import { useNavigate } from 'react-router-dom'
 import Alert from '../components/Alert.jsx'
 import Badge from '../components/Badge.jsx'
 import FormField, { inputClass } from '../components/FormField.jsx'
+import Modal from '../components/Modal.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
-import api from '../api/client.js'
+import api, { TOKEN_KEYS } from '../api/client.js'
 import { formatError } from '../utils/errors.js'
 
 const roleBadgeMap = {
@@ -46,7 +47,7 @@ const CURRENCIES = [
 ]
 
 export default function Profile() {
-  const { user, updateProfile, logout } = useAuth()
+  const { user, updateProfile, logout, fetchMe } = useAuth()
   const navigate = useNavigate()
   const profile = user?.profile ?? {}
 
@@ -83,6 +84,14 @@ export default function Profile() {
   const [saving, setSaving] = useState(false)
   const [passwordStatus, setPasswordStatus] = useState({ message: '', type: 'error' })
   const [passwordSaving, setPasswordSaving] = useState(false)
+
+  // Email change verification
+  const [emailModalOpen, setEmailModalOpen] = useState(false)
+  const [emailStep, setEmailStep] = useState('email')
+  const [newEmail, setNewEmail] = useState('')
+  const [emailCode, setEmailCode] = useState('')
+  const [emailStatus, setEmailStatus] = useState({ message: '', type: 'error' })
+  const [emailSaving, setEmailSaving] = useState(false)
 
   useEffect(() => {
     setPersonalForm({
@@ -185,6 +194,51 @@ export default function Profile() {
       setPasswordStatus({ message: formatError(err), type: 'error' })
     } finally {
       setPasswordSaving(false)
+    }
+  }
+
+  const openEmailChange = () => {
+    setNewEmail('')
+    setEmailCode('')
+    setEmailStep('email')
+    setEmailStatus({ message: '', type: 'error' })
+    setEmailModalOpen(true)
+  }
+
+  const closeEmailChange = () => {
+    if (!emailSaving) setEmailModalOpen(false)
+  }
+
+  const handleRequestEmailCode = async (e) => {
+    e.preventDefault()
+    setEmailSaving(true)
+    setEmailStatus({ message: '', type: 'error' })
+    try {
+      const { data } = await api.post('/auth/email-change/request/', { email: newEmail })
+      setEmailStep('code')
+      setEmailStatus({ message: data.detail || 'Verification code sent.', type: 'success' })
+    } catch (err) {
+      setEmailStatus({ message: formatError(err), type: 'error' })
+    } finally {
+      setEmailSaving(false)
+    }
+  }
+
+  const handleVerifyEmailChange = async (e) => {
+    e.preventDefault()
+    setEmailSaving(true)
+    setEmailStatus({ message: '', type: 'error' })
+    try {
+      const { data } = await api.post('/auth/email-change/verify/', { code: emailCode })
+      localStorage.setItem(TOKEN_KEYS.access, data.access)
+      localStorage.setItem(TOKEN_KEYS.refresh, data.refresh)
+      await fetchMe()
+      setEmailStatus({ message: data.detail || 'Email address changed successfully.', type: 'success' })
+      setEmailModalOpen(false)
+    } catch (err) {
+      setEmailStatus({ message: formatError(err), type: 'error' })
+    } finally {
+      setEmailSaving(false)
     }
   }
 
@@ -396,17 +450,23 @@ export default function Profile() {
                     </div>
                   </FormField>
 
-                  <FormField label="Email Address" id="email" hint="Primary login credential (read-only)">
+                  <FormField label="Email Address" id="email" hint="Primary login credential">
                     <div className="relative">
                       <Mail className="pointer-events-none absolute left-3.5 top-3 h-4 w-4 text-fg-faint" />
                       <input
                         id="email"
                         type="email"
                         readOnly
-                        disabled
                         value={user?.email || ''}
-                        className={`${inputClass} pl-10 opacity-70 cursor-not-allowed bg-surface/50`}
+                        className={`${inputClass} pl-10 pr-24`}
                       />
+                      <button
+                        type="button"
+                        onClick={openEmailChange}
+                        className="absolute right-2 top-1.5 rounded-lg border border-accent/30 bg-accent-soft px-2.5 py-1.5 text-xs font-semibold text-accent"
+                      >
+                        Change
+                      </button>
                     </div>
                   </FormField>
                 </div>
@@ -810,6 +870,73 @@ export default function Profile() {
           </div>
         </div>
       </div>
+      <Modal
+        open={emailModalOpen}
+        onClose={closeEmailChange}
+        title="Change email address"
+        subtitle={
+          emailStep === 'email'
+            ? 'Enter the new email address. A 6-digit code will be sent to it.'
+            : `Enter the 6-digit code sent to ${newEmail}.`
+        }
+      >
+        <Alert message={emailStatus.message} type={emailStatus.type} />
+        {emailStep === 'email' ? (
+          <form onSubmit={handleRequestEmailCode} className="flex flex-col gap-4">
+            <FormField label="New email address" id="new_email" hint="Maximum two changes per calendar month">
+              <input
+                id="new_email"
+                type="email"
+                required
+                autoComplete="email"
+                className={inputClass}
+                value={newEmail}
+                onChange={(event) => setNewEmail(event.target.value)}
+              />
+            </FormField>
+            <button
+              type="submit"
+              disabled={emailSaving}
+              className="rounded-xl bg-accent px-5 py-2.5 text-sm font-bold text-on-accent disabled:opacity-60"
+            >
+              {emailSaving ? 'Sending code…' : 'Send verification code'}
+            </button>
+          </form>
+        ) : (
+          <form onSubmit={handleVerifyEmailChange} className="flex flex-col gap-4">
+            <FormField label="Verification code" id="email_code" hint="The code expires after 10 minutes">
+              <input
+                id="email_code"
+                inputMode="numeric"
+                pattern="[0-9]{6}"
+                maxLength={6}
+                required
+                className={`${inputClass} tracking-[0.35em] text-center text-lg`}
+                value={emailCode}
+                onChange={(event) => setEmailCode(event.target.value.replace(/\D/g, '').slice(0, 6))}
+              />
+            </FormField>
+            <button
+              type="submit"
+              disabled={emailSaving}
+              className="rounded-xl bg-accent px-5 py-2.5 text-sm font-bold text-on-accent disabled:opacity-60"
+            >
+              {emailSaving ? 'Verifying…' : 'Verify and change email'}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setEmailStep('email')
+                setEmailCode('')
+                setEmailStatus({ message: '', type: 'error' })
+              }}
+              className="text-xs font-semibold text-fg-muted"
+            >
+              Use a different email
+            </button>
+          </form>
+        )}
+      </Modal>
     </div>
   )
 }
