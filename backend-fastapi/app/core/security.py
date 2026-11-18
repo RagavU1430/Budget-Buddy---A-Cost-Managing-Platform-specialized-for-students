@@ -77,13 +77,13 @@ def _encode(payload: dict[str, Any]) -> str:
     return jwt.encode(payload, settings.SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
 
 
-def create_access_token(user_id: int, role: str, email: str) -> str:
+def create_access_token(user_id: int, role: str, email: str, jti: str | None = None) -> str:
     now = _now()
     payload = {
         "token_type": "access",
         "exp": now + timedelta(minutes=settings.ACCESS_TOKEN_MINUTES),
         "iat": now,
-        "jti": uuid.uuid4().hex,
+        "jti": jti or uuid.uuid4().hex,
         "user_id": user_id,
         "role": role,
         "email": email,
@@ -91,13 +91,13 @@ def create_access_token(user_id: int, role: str, email: str) -> str:
     return _encode(payload)
 
 
-def create_refresh_token(user_id: int, role: str, email: str) -> str:
+def create_refresh_token(user_id: int, role: str, email: str, jti: str | None = None) -> str:
     now = _now()
     payload = {
         "token_type": "refresh",
         "exp": now + timedelta(days=settings.REFRESH_TOKEN_DAYS),
         "iat": now,
-        "jti": uuid.uuid4().hex,
+        "jti": jti or uuid.uuid4().hex,
         "user_id": user_id,
         "role": role,
         "email": email,

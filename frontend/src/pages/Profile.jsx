@@ -46,6 +46,20 @@ const CURRENCIES = [
   { code: 'SGD', symbol: 'S$', name: 'Singapore Dollar' },
 ]
 
+/**
+ * Validates that a URL is safe to render.
+ * Only allows https:// URLs, blocks javascript: and other dangerous schemes.
+ */
+function isValidAvatarUrl(url) {
+  if (!url) return false
+  try {
+    const parsed = new URL(url)
+    return parsed.protocol === 'https:'
+  } catch {
+    return false
+  }
+}
+
 export default function Profile() {
   const { user, updateProfile, logout, fetchMe } = useAuth()
   const navigate = useNavigate()
@@ -216,7 +230,15 @@ export default function Profile() {
     try {
       const { data } = await api.post('/auth/email-change/request/', { email: newEmail })
       setEmailStep('code')
-      setEmailStatus({ message: data.detail || 'Verification code sent.', type: 'success' })
+      if (data.dev_code) {
+        setEmailCode(data.dev_code)
+        setEmailStatus({
+          message: `Verification code: ${data.dev_code} (SMTP offline on server - code auto-filled)`,
+          type: 'success',
+        })
+      } else {
+        setEmailStatus({ message: data.detail || `Verification code sent to ${newEmail}.`, type: 'success' })
+      }
     } catch (err) {
       setEmailStatus({ message: formatError(err), type: 'error' })
     } finally {
@@ -230,11 +252,12 @@ export default function Profile() {
     setEmailStatus({ message: '', type: 'error' })
     try {
       const { data } = await api.post('/auth/email-change/verify/', { code: emailCode })
-      localStorage.setItem(TOKEN_KEYS.access, data.access)
-      localStorage.setItem(TOKEN_KEYS.refresh, data.refresh)
+      if (data.access) localStorage.setItem(TOKEN_KEYS.access, data.access)
+      if (data.refresh) localStorage.setItem(TOKEN_KEYS.refresh, data.refresh)
       await fetchMe()
       setEmailStatus({ message: data.detail || 'Email address changed successfully.', type: 'success' })
       setEmailModalOpen(false)
+      setStatus({ message: 'Email address updated successfully!', type: 'success' })
     } catch (err) {
       setEmailStatus({ message: formatError(err), type: 'error' })
     } finally {
@@ -277,7 +300,7 @@ export default function Profile() {
           <div className="flex flex-col sm:flex-row items-start sm:items-center gap-5">
             {/* Avatar Preview */}
             <div className="relative group">
-              {personalForm.avatar_url ? (
+              {personalForm.avatar_url && isValidAvatarUrl(personalForm.avatar_url) ? (
                 <img
                   src={personalForm.avatar_url}
                   alt={user?.username}
@@ -487,7 +510,7 @@ export default function Profile() {
                     </div>
                   </FormField>
 
-                  <FormField label="Profile Avatar URL (Optional)" id="avatar_url" hint="Direct link to JPG/PNG image">
+                  <FormField label="Profile Avatar URL (Optional)" id="avatar_url" hint="Direct link to JPG/PNG image (HTTPS only)">
                     <input
                       id="avatar_url"
                       name="avatar_url"

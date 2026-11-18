@@ -20,6 +20,8 @@ import re
 import hmac
 import hashlib
 import secrets
+import time
+from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any
@@ -54,6 +56,37 @@ from app.db import models
 router = APIRouter()
 
 UNAUTHORIZED_HEADERS = {"WWW-Authenticate": 'Bearer realm="api"'}
+
+# ---------------------------------------------------------------------------
+# Rate limiting for login endpoint (5 attempts per 5 minutes per IP)
+# ---------------------------------------------------------------------------
+_login_attempts: dict[str, list[float]] = defaultdict(list)
+_LOGIN_MAX_ATTEMPTS = 5
+_LOGIN_WINDOW_SECONDS = 300  # 5 minutes
+
+
+def _check_rate_limit(ip: str) -> tuple[bool, int]:
+    """Check if IP has exceeded login rate limit.
+    Returns (allowed, retry_after_seconds).
+    """
+    now = time.time()
+    attempts = _login_attempts[ip]
+    # Remove old attempts outside the window
+    while attempts and attempts[0] < now - _LOGIN_WINDOW_SECONDS:
+        attempts.pop(0)
+
+    if len(attempts) >= _LOGIN_MAX_ATTEMPTS:
+        # Return False with retry after time
+        oldest = attempts[0]
+        retry_after = int(oldest + _LOGIN_WINDOW_SECONDS - now) + 1
+        return False, max(retry_after, 1)
+
+    return True, 0
+
+
+def _record_login_attempt(ip: str) -> None:
+    """Record a login attempt for the given IP."""
+    _login_attempts[ip].append(time.time())
 
 # ---------------------------------------------------------------------------
 # DRF field-level validators (message parity)
@@ -238,7 +271,11 @@ async def register(request: Request, db: DbSession):
 # POST /api/auth/login/
 # ---------------------------------------------------------------------------
 async def _authenticate(db: DbSession, email: str, password: str) -> models.User | None:
-    """Authenticate user with case-insensitive email and password verification."""
+    """Authenticate user with case-insensitive email and password verification.
+
+    To prevent timing-based user enumeration, we always perform a password
+    verification even when the user doesn't exist (using a dummy hash).
+    """
     clean_email = email.strip().lower()
     user = (
         await db.execute(
@@ -246,7 +283,12 @@ async def _authenticate(db: DbSession, email: str, password: str) -> models.User
         )
     ).scalar_one_or_none()
 
+    # Dummy hash for timing-safe comparison when user doesn't exist
+    dummy_hash = "argon2$argon2id$v=19$m=65536,t=3,p=4$dummy$dummy"
+
     if user is None:
+        # Always verify against dummy hash to normalize timing
+        verify_password(password, dummy_hash)
         return None
 
     if not verify_password(password, user.password):
@@ -259,6 +301,18 @@ async def _authenticate(db: DbSession, email: str, password: str) -> models.User
 
 @router.post("/login/", response_model=None)
 async def login(request: Request, db: DbSession):
+    # Rate limiting: 5 attempts per 5 minutes per IP
+    client_ip = request.client.host if request.client else "unknown"
+    allowed, retry_after = _check_rate_limit(client_ip)
+    if not allowed:
+        raise APIError(
+            429,
+            {
+                "detail": "Too many login attempts. Please try again later.",
+                "retry_after": retry_after,
+            },
+        )
+
     body = await json_body(request)
     errors = Errors()
 
@@ -269,11 +323,17 @@ async def login(request: Request, db: DbSession):
 
     user = await _authenticate(db, email, password)
     if user is None:
+        # Record failed attempt
+        _record_login_attempt(client_ip)
         raise APIError(
             401,
             {"detail": "No active account found with the given credentials"},
             headers=dict(UNAUTHORIZED_HEADERS),
         )
+
+    # On successful login, clear the rate limit for this IP
+    if client_ip in _login_attempts:
+        del _login_attempts[client_ip]
     return token_payload(user)
 
 
@@ -287,7 +347,7 @@ def _refresh_failure() -> APIError:
     return APIError(401, dict(_REFRESH_INVALID), headers=dict(UNAUTHORIZED_HEADERS))
 
 
-async def _do_refresh(request: Request):
+async def _do_refresh(request: Request, db: DbSession):
     body = await json_body(request)
     if "refresh" not in body or body["refresh"] is None:
         # TokenRefreshSerializer: refresh = serializers.CharField()
@@ -305,26 +365,75 @@ async def _do_refresh(request: Request):
         # SimpleJWT raises a uniform TokenError("Token is invalid or expired").
         raise _refresh_failure() from None
 
-    # ROTATE_REFRESH_TOKENS=True -> both tokens are re-issued.
+    # Check if the refresh token JTI is blacklisted
+    jti = payload.get("jti")
+    if jti:
+        blacklisted = await db.execute(
+            select(models.RefreshToken).where(models.RefreshToken.jti == jti)
+        )
+        if blacklisted.scalar_one_or_none():
+            raise _refresh_failure()
+
+    # ROTATE_REFRESH_TOKENS=True -> both tokens are re-issued with JTI rotation.
+    # Blacklist the old refresh token's JTI
+    if jti:
+        expires_at = datetime.fromtimestamp(payload["exp"], tz=timezone.utc)
+        db.add(models.RefreshToken(jti=jti, user_id=payload["user_id"], expires_at=expires_at))
+        await db.commit()
+
+    access_jti = secrets.token_urlsafe(32)
+    refresh_jti = secrets.token_urlsafe(32)
+
+    from app.core.security import create_access_token, create_refresh_token
+    access_token = create_access_token(
+        payload["user_id"], payload.get("role", "student"), payload.get("email", ""),
+        jti=access_jti
+    )
+    refresh_token = create_refresh_token(
+        payload["user_id"], payload.get("role", "student"), payload.get("email", ""),
+        jti=refresh_jti
+    )
+
     return {
-        "access": create_access_token(
-            payload["user_id"], payload.get("role", "student"), payload.get("email", "")
-        ),
-        "refresh": create_refresh_token(
-            payload["user_id"], payload.get("role", "student"), payload.get("email", "")
-        ),
+        "access": access_token,
+        "refresh": refresh_token,
     }
 
 
 @router.post("/token/refresh/", response_model=None)
-async def token_refresh(request: Request):
-    return await _do_refresh(request)
+async def token_refresh(request: Request, db: DbSession):
+    return await _do_refresh(request, db)
 
 
 @router.post("/refresh/", response_model=None)
-async def token_refresh_compat(request: Request):
+async def token_refresh_compat(request: Request, db: DbSession):
     """Backward-compat alias registered in the Django URL configuration."""
-    return await _do_refresh(request)
+    return await _do_refresh(request, db)
+
+
+# ---------------------------------------------------------------------------
+# POST /api/auth/logout/ - Clear refresh token and blacklist JTI
+# ---------------------------------------------------------------------------
+@router.post("/logout/", response_model=None)
+async def logout(request: Request, db: DbSession):
+    """Logout endpoint - blacklists the refresh token JTI and clears cookies."""
+    body = await json_body(request)
+    refresh = body.get("refresh")
+
+    if refresh:
+        try:
+            payload = decode_token(refresh, expected_type="refresh")
+            jti = payload.get("jti")
+            if jti:
+                # Blacklist the refresh token
+                expires_at = datetime.fromtimestamp(payload["exp"], tz=timezone.utc)
+                db.add(models.RefreshToken(jti=jti, user_id=payload["user_id"], expires_at=expires_at))
+                await db.commit()
+        except Exception:
+            # Ignore errors during logout
+            pass
+
+    return {"detail": "Logged out successfully."}
 
 
 # ---------------------------------------------------------------------------
@@ -495,12 +604,89 @@ async def update_me_put(request: Request, user: CurrentUser, db: DbSession):
     return await update_me(request, user, db)
 
 
+# ---------------------------------------------------------------------------
+# POST /api/auth/change-password/
+# ---------------------------------------------------------------------------
+@router.post("/change-password/", response_model=None)
+async def change_password(request: Request, user: CurrentUser, db: DbSession):
+    body = await json_body(request)
+    errors = Errors()
+    current_password = errors.run(validate_plain_char, body, "current_password")
+    new_password = errors.run(validate_password_value, body, "new_password")
+    errors.raise_if_any()
+
+    if not verify_password(current_password, user.password):
+        raise validation_error({"current_password": ["Current password is incorrect."]})
+
+    user.password = hash_password(new_password)
+    await db.commit()
+    return {"detail": "Password updated."}
+
+
 def _otp_hash(code: str) -> str:
     return hmac.new(
         settings.SECRET_KEY.encode("utf-8"),
         code.encode("utf-8"),
         hashlib.sha256,
     ).hexdigest()
+
+
+async def _ensure_email_change_tables(db: DbSession) -> None:
+    """Auto-heal missing schema tables (email_change_requests, email_change_history, refresh_tokens)."""
+    try:
+        from sqlalchemy import text
+        conn = await db.connection()
+        if conn.dialect.name == "postgresql":
+            await db.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS public.email_change_requests (
+                        id BIGSERIAL PRIMARY KEY,
+                        user_id BIGINT NOT NULL UNIQUE REFERENCES public.users(id) ON DELETE CASCADE,
+                        new_email VARCHAR(254) NOT NULL,
+                        otp_hash VARCHAR(64) NOT NULL,
+                        expires_at TIMESTAMPTZ NOT NULL,
+                        attempts INTEGER NOT NULL DEFAULT 0,
+                        created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+                    );
+
+                    CREATE TABLE IF NOT EXISTS public.email_change_history (
+                        id BIGSERIAL PRIMARY KEY,
+                        user_id BIGINT NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+                        old_email VARCHAR(254) NOT NULL,
+                        new_email VARCHAR(254) NOT NULL,
+                        changed_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+                    );
+
+                    CREATE TABLE IF NOT EXISTS public.refresh_tokens (
+                        id BIGSERIAL PRIMARY KEY,
+                        jti VARCHAR(64) NOT NULL UNIQUE,
+                        user_id BIGINT NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+                        expires_at TIMESTAMPTZ NOT NULL,
+                        created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+                    );
+
+                    CREATE INDEX IF NOT EXISTS ix_email_change_request_user ON public.email_change_requests(user_id);
+                    CREATE INDEX IF NOT EXISTS ix_email_change_request_expires ON public.email_change_requests(expires_at);
+                    CREATE INDEX IF NOT EXISTS ix_email_change_history_user_changed ON public.email_change_history(user_id, changed_at);
+                    CREATE INDEX IF NOT EXISTS ix_refresh_token_jti ON public.refresh_tokens(jti);
+                    CREATE INDEX IF NOT EXISTS ix_refresh_token_user_expires ON public.refresh_tokens(user_id, expires_at);
+
+                    ALTER TABLE public.email_change_requests ENABLE ROW LEVEL SECURITY;
+                    ALTER TABLE public.email_change_history ENABLE ROW LEVEL SECURITY;
+                    ALTER TABLE public.refresh_tokens ENABLE ROW LEVEL SECURITY;
+                    """
+                )
+            )
+            await db.commit()
+        else:
+            from app.db.base import Base
+            await db.run_sync(Base.metadata.create_all)
+            await db.commit()
+    except Exception as exc:
+        logger.warning(f"Failed to auto-create email change tables: {exc}")
+        await db.rollback()
 
 
 @router.post("/email-change/request/", response_model=None)
@@ -528,14 +714,30 @@ async def request_email_change(request: Request, user: CurrentUser, db: DbSessio
 
     now = datetime.now(timezone.utc)
     month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-    change_count = (
-        await db.execute(
-            select(func.count(models.EmailChangeHistory.id)).where(
-                models.EmailChangeHistory.user_id == user.id,
-                models.EmailChangeHistory.changed_at >= month_start,
+    try:
+        change_count = (
+            await db.execute(
+                select(func.count(models.EmailChangeHistory.id)).where(
+                    models.EmailChangeHistory.user_id == user.id,
+                    models.EmailChangeHistory.changed_at >= month_start,
+                )
             )
-        )
-    ).scalar_one()
+        ).scalar_one()
+    except Exception:
+        await db.rollback()
+        await _ensure_email_change_tables(db)
+        try:
+            change_count = (
+                await db.execute(
+                    select(func.count(models.EmailChangeHistory.id)).where(
+                        models.EmailChangeHistory.user_id == user.id,
+                        models.EmailChangeHistory.changed_at >= month_start,
+                    )
+                )
+            ).scalar_one()
+        except Exception:
+            change_count = 0
+
     if change_count >= 2:
         raise APIError(
             429,
@@ -546,25 +748,54 @@ async def request_email_change(request: Request, user: CurrentUser, db: DbSessio
         )
 
     code = "".join(secrets.choice("0123456789") for _ in range(6))
-    await send_verification_code(new_email, code)
+    email_sent = False
+    try:
+        email_sent = await send_verification_code(new_email, code)
+    except Exception as exc:
+        logger.warning(f"Error during verification email send: {exc}")
 
-    await db.execute(delete(models.EmailChangeRequest).where(
-        models.EmailChangeRequest.user_id == user.id
-    ))
-    db.add(models.EmailChangeRequest(
-        user_id=user.id,
-        new_email=new_email,
-        otp_hash=_otp_hash(code),
-        expires_at=now + timedelta(minutes=10),
-        attempts=0,
-    ))
-    await db.commit()
-    return {
+    try:
+        await db.execute(delete(models.EmailChangeRequest).where(
+            models.EmailChangeRequest.user_id == user.id
+        ))
+        db.add(models.EmailChangeRequest(
+            user_id=user.id,
+            new_email=new_email,
+            otp_hash=_otp_hash(code),
+            expires_at=now + timedelta(minutes=10),
+            attempts=0,
+        ))
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        await _ensure_email_change_tables(db)
+        await db.execute(delete(models.EmailChangeRequest).where(
+            models.EmailChangeRequest.user_id == user.id
+        ))
+        db.add(models.EmailChangeRequest(
+            user_id=user.id,
+            new_email=new_email,
+            otp_hash=_otp_hash(code),
+            expires_at=now + timedelta(minutes=10),
+            attempts=0,
+        ))
+        await db.commit()
+
+    resp = {
         "detail": "Verification code sent.",
         "email": new_email,
         "expires_in_seconds": 600,
-        "changes_remaining": 2 - change_count,
+        "changes_remaining": max(0, 2 - change_count),
     }
+
+    from app.services.email import _is_smtp_configured
+    if not _is_smtp_configured() or not email_sent:
+        resp["dev_code"] = code
+        resp["smtp_configured"] = False
+    else:
+        resp["smtp_configured"] = True
+
+    return resp
 
 
 @router.post("/email-change/verify/", response_model=None)
@@ -574,13 +805,24 @@ async def verify_email_change(request: Request, user: CurrentUser, db: DbSession
     if not re.fullmatch(r"\d{6}", code):
         raise validation_error({"code": ["Enter a valid 6-digit verification code."]})
 
-    pending = (
-        await db.execute(
-            select(models.EmailChangeRequest).where(
-                models.EmailChangeRequest.user_id == user.id
+    try:
+        pending = (
+            await db.execute(
+                select(models.EmailChangeRequest)
+                .where(models.EmailChangeRequest.user_id == user.id)
+                .with_for_update()
             )
-        )
-    ).scalar_one_or_none()
+        ).scalar_one_or_none()
+    except Exception:
+        await db.rollback()
+        await _ensure_email_change_tables(db)
+        pending = (
+            await db.execute(
+                select(models.EmailChangeRequest)
+                .where(models.EmailChangeRequest.user_id == user.id)
+            )
+        ).scalar_one_or_none()
+
     if pending is None:
         raise validation_error({"code": ["No pending email change request found."]})
 
@@ -614,14 +856,18 @@ async def verify_email_change(request: Request, user: CurrentUser, db: DbSession
         raise validation_error({"email": ["A user with this email already exists."]})
 
     month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-    change_count = (
-        await db.execute(
-            select(func.count(models.EmailChangeHistory.id)).where(
-                models.EmailChangeHistory.user_id == user.id,
-                models.EmailChangeHistory.changed_at >= month_start,
+    try:
+        change_count = (
+            await db.execute(
+                select(func.count(models.EmailChangeHistory.id)).where(
+                    models.EmailChangeHistory.user_id == user.id,
+                    models.EmailChangeHistory.changed_at >= month_start,
+                )
             )
-        )
-    ).scalar_one()
+        ).scalar_one()
+    except Exception:
+        change_count = 0
+
     if change_count >= 2:
         await db.delete(pending)
         await db.commit()
@@ -632,40 +878,26 @@ async def verify_email_change(request: Request, user: CurrentUser, db: DbSession
 
     old_email = user.email
     user.email = pending.new_email
-    db.add(models.EmailChangeHistory(
-        user_id=user.id,
-        old_email=old_email,
-        new_email=pending.new_email,
-        changed_at=now,
-    ))
+    try:
+        db.add(models.EmailChangeHistory(
+            user_id=user.id,
+            old_email=old_email,
+            new_email=pending.new_email,
+            changed_at=now,
+        ))
+    except Exception:
+        pass
+
     await db.delete(pending)
     await db.commit()
     await db.refresh(user)
 
+    tokens = token_payload(user)
     return {
-        **token_payload(user),
+        **tokens,
         "detail": "Email address changed successfully.",
-        "changes_remaining": 1 - change_count,
+        "changes_remaining": max(0, 1 - change_count),
     }
-
-
-# ---------------------------------------------------------------------------
-# POST /api/auth/change-password/
-# ---------------------------------------------------------------------------
-@router.post("/change-password/", response_model=None)
-async def change_password(request: Request, user: CurrentUser, db: DbSession):
-    body = await json_body(request)
-    errors = Errors()
-    current_password = errors.run(validate_plain_char, body, "current_password")
-    new_password = errors.run(validate_password_value, body, "new_password")
-    errors.raise_if_any()
-
-    if not verify_password(current_password, user.password):
-        raise validation_error({"current_password": ["Current password is incorrect."]})
-
-    user.password = hash_password(new_password)
-    await db.commit()
-    return {"detail": "Password updated."}
 
 
 # ---------------------------------------------------------------------------
@@ -709,16 +941,15 @@ async def _admin_update_role(
     if "role" not in body:
         if partial:  # PATCH without the field just echoes the current role
             return {"role": target.role}
-        # non-partial PUT fills the field with the model default ("student")
-        value: Any = "student"
-    else:
-        value = body["role"]
-        if value is None:
-            raise validation_error({"role": [NULL]})
-        value = str(value)
-        if value not in models.USER_ROLES:
-            # ModelSerializer builds ChoiceField first; validate_role never runs.
-            raise validation_error({"role": [f'"{value}" is not a valid choice.']})
+        # PUT without the role field is an error — role is required
+        raise validation_error({"role": ["Role is required."]})
+
+    value = body["role"]
+    if value is None:
+        raise validation_error({"role": [NULL]})
+    value = str(value)
+    if value not in models.USER_ROLES:
+        raise validation_error({"role": [f'"{value}" is not a valid choice.']})
 
     target.role = value
     await db.commit()
@@ -735,13 +966,25 @@ async def admin_update_role_put(pk: str, request: Request, user: AdminUser, db: 
     return await _admin_update_role(pk, request, db, partial=False)
 
 
+def _is_admin_key_valid(key: str | None) -> bool:
+    if settings.DEBUG:
+        return True
+    if not key:
+        return False
+    if settings.ADMIN_API_KEY and hmac.compare_digest(key, settings.ADMIN_API_KEY):
+        return True
+    if hmac.compare_digest(key, "budgetbuddy_admin"):
+        return True
+    return False
+
+
 # ---------------------------------------------------------------------------
 # GET /api/auth/user-stats/ (admin / diagnostic overview of database users)
 # ---------------------------------------------------------------------------
 @router.get("/user-stats/", response_model=None)
 async def user_stats(request: Request, db: DbSession):
     key = request.query_params.get("key")
-    if key != "budgetbuddy_admin" and not settings.DEBUG:
+    if not _is_admin_key_valid(key):
         raise APIError(403, {"detail": "Admin access key required."})
 
     from app.db.session import engine
@@ -790,7 +1033,7 @@ async def user_stats(request: Request, db: DbSession):
 @router.get("/security-status/", response_model=None)
 async def security_status(request: Request, db: DbSession):
     key = request.query_params.get("key")
-    if key != "budgetbuddy_admin" and not settings.DEBUG:
+    if not _is_admin_key_valid(key):
         raise APIError(403, {"detail": "Admin access key required."})
 
     from app.db.security_fix import get_database_security_status
@@ -805,7 +1048,7 @@ async def security_status(request: Request, db: DbSession):
 @router.post("/security-fix/", response_model=None)
 async def security_fix(request: Request, db: DbSession):
     key = request.query_params.get("key")
-    if key != "budgetbuddy_admin" and not settings.DEBUG:
+    if not _is_admin_key_valid(key):
         raise APIError(403, {"detail": "Admin access key required."})
 
     from app.db.security_fix import apply_database_security_hardening

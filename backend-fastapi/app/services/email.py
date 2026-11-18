@@ -217,8 +217,11 @@ async def send_email_async(to_email: str, subject: str, html_body: str, text_bod
         logger.warning("Error scheduling async email: %s", exc)
 
 
-async def send_verification_code(to_email: str, code: str) -> None:
-    """Send a 6-digit verification code via email."""
+async def send_verification_code(to_email: str, code: str) -> bool:
+    """Send a 6-digit verification code via email.
+
+    Returns True if sent (or logged in simulation), False on delivery error.
+    """
     subject = "Your BudgetBuddy Verification Code"
     preheader = f"Your verification code is {code}. It expires in 10 minutes."
 
@@ -245,7 +248,22 @@ Expires in: 10 minutes
 
 If you didn't request this, please ignore this email.
 """
-    await send_email_async(to_email, subject, _base_email_template(subject, preheader, html_content), text_body)
+    if not _is_smtp_configured():
+        logger.info("[EMAIL SIMULATION] Verification code for %s is %s", to_email, code)
+        return True
+
+    try:
+        sent = await asyncio.to_thread(
+            _send_smtp_sync,
+            to_email,
+            subject,
+            _base_email_template(subject, preheader, html_content),
+            text_body,
+        )
+        return bool(sent)
+    except Exception as exc:
+        logger.warning("Failed to dispatch verification code email to %s: %s", to_email, exc)
+        return False
 
 
 def dispatch_email_in_background(to_email: str, subject: str, html_body: str, text_body: str) -> None:

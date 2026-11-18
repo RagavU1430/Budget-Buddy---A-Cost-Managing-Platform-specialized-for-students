@@ -33,6 +33,46 @@ async def apply_database_security_hardening(conn: AsyncConnection) -> dict[str, 
             "tables": [],
         }
 
+    # 0. Ensure all modern auth and security tables exist before scanning
+    await conn.execute(
+        text(
+            """
+            CREATE TABLE IF NOT EXISTS public.email_change_requests (
+                id BIGSERIAL PRIMARY KEY,
+                user_id BIGINT NOT NULL UNIQUE REFERENCES public.users(id) ON DELETE CASCADE,
+                new_email VARCHAR(254) NOT NULL,
+                otp_hash VARCHAR(64) NOT NULL,
+                expires_at TIMESTAMPTZ NOT NULL,
+                attempts INTEGER NOT NULL DEFAULT 0,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE TABLE IF NOT EXISTS public.email_change_history (
+                id BIGSERIAL PRIMARY KEY,
+                user_id BIGINT NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+                old_email VARCHAR(254) NOT NULL,
+                new_email VARCHAR(254) NOT NULL,
+                changed_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE TABLE IF NOT EXISTS public.refresh_tokens (
+                id BIGSERIAL PRIMARY KEY,
+                jti VARCHAR(64) NOT NULL UNIQUE,
+                user_id BIGINT NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+                expires_at TIMESTAMPTZ NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE INDEX IF NOT EXISTS ix_email_change_request_user ON public.email_change_requests(user_id);
+            CREATE INDEX IF NOT EXISTS ix_email_change_request_expires ON public.email_change_requests(expires_at);
+            CREATE INDEX IF NOT EXISTS ix_email_change_history_user_changed ON public.email_change_history(user_id, changed_at);
+            CREATE INDEX IF NOT EXISTS ix_refresh_token_jti ON public.refresh_tokens(jti);
+            CREATE INDEX IF NOT EXISTS ix_refresh_token_user_expires ON public.refresh_tokens(user_id, expires_at);
+            """
+        )
+    )
+
     # 1. Fetch all tables currently in the public schema
     res = await conn.execute(
         text("SELECT tablename, rowsecurity FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename")
@@ -42,16 +82,17 @@ async def apply_database_security_hardening(conn: AsyncConnection) -> dict[str, 
     status_list: list[dict[str, Any]] = []
 
     for tablename, rowsecurity in tables:
-        # Enable RLS on each table in public schema
-        await conn.execute(text(f'ALTER TABLE public."{tablename}" ENABLE ROW LEVEL SECURITY'))
+        # Enable FORCE RLS on each table in public schema
+        # FORCE ensures RLS is enabled even if the user is the table owner
+        await conn.execute(text(f'ALTER TABLE public."{tablename}" FORCE ROW LEVEL SECURITY'))
 
         # Revoke direct table permissions from anon & authenticated
         try:
             await conn.execute(
                 text(f'REVOKE ALL ON TABLE public."{tablename}" FROM anon, authenticated')
             )
-        except Exception:
-            pass
+        except Exception as e:
+            logger.error(f"[SecurityFix] Failed to REVOKE TABLE permissions for {tablename}: {e}")
 
         status_list.append({
             "table": tablename,
@@ -59,7 +100,12 @@ async def apply_database_security_hardening(conn: AsyncConnection) -> dict[str, 
             "was_previously_enabled": bool(rowsecurity),
         })
 
-    # Revoke schema-wide permissions from anon and authenticated PostgREST roles
+    # Revoke schema USAGE from anon, authenticated, and PUBLIC
+    await conn.execute(
+        text('REVOKE USAGE ON SCHEMA public FROM anon, authenticated, PUBLIC')
+    )
+
+    # Revoke ALL on tables, sequences, routines from anon and authenticated
     for stmt in [
         "REVOKE ALL ON ALL TABLES IN SCHEMA public FROM anon, authenticated",
         "REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM anon, authenticated",
@@ -70,8 +116,8 @@ async def apply_database_security_hardening(conn: AsyncConnection) -> dict[str, 
     ]:
         try:
             await conn.execute(text(stmt))
-        except Exception:
-            pass
+        except Exception as e:
+            logger.error(f"[SecurityFix] Failed to execute: {stmt[:60]}...: {e}")
 
     return {
         "applied": True,
@@ -89,7 +135,7 @@ async def get_database_security_status(conn: AsyncConnection) -> dict[str, Any]:
             "dialect": dialect_name,
             "is_postgres": False,
             "tables": [],
-            "all_rls_enabled": True,
+            "all_rls_enabled": None,  # Not applicable for non-Postgres databases
         }
 
     res = await conn.execute(

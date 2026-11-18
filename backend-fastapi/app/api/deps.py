@@ -133,7 +133,7 @@ async def require_premium(user: CurrentUser) -> models.User:
 
 
 async def require_admin(user: CurrentUser) -> models.User:
-    if not (user.role == "admin" or user.is_staff or user.is_superuser):
+    if user.role != "admin":
         raise permission_denied("Admin access required.")
     return user
 

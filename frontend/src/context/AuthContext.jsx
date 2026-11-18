@@ -8,9 +8,9 @@ export function AuthProvider({ children }) {
   const [user, setUser] = useState(null)
   const [loading, setLoading] = useState(true)
 
-  const storeTokens = useCallback((tokens) => {
-    localStorage.setItem(TOKEN_KEYS.access, tokens.access)
-    localStorage.setItem(TOKEN_KEYS.refresh, tokens.refresh)
+  const storeTokens = useCallback((data) => {
+    if (data?.access) localStorage.setItem(TOKEN_KEYS.access, data.access)
+    if (data?.refresh) localStorage.setItem(TOKEN_KEYS.refresh, data.refresh)
   }, [])
 
   const clearTokens = useCallback(() => {
@@ -19,10 +19,16 @@ export function AuthProvider({ children }) {
   }, [])
 
   const fetchMe = useCallback(async () => {
-    const { data } = await api.get('/auth/me/')
-    setUser(data)
-    return data
-  }, [])
+    try {
+      const { data } = await api.get('/auth/me/')
+      setUser(data)
+      return data
+    } catch {
+      clearTokens()
+      setUser(null)
+      throw new Error('Not authenticated')
+    }
+  }, [clearTokens])
 
   const login = useCallback(
     async ({ email, password }) => {
@@ -44,9 +50,17 @@ export function AuthProvider({ children }) {
     [storeTokens],
   )
 
-  const logout = useCallback(() => {
-    clearTokens()
-    setUser(null)
+  const logout = useCallback(async () => {
+    try {
+      const refresh = localStorage.getItem(TOKEN_KEYS.refresh)
+      await api.post('/auth/logout/', { refresh })
+    } catch {
+      // Ignore logout errors
+    } finally {
+      clearTokens()
+      setUser(null)
+      window.dispatchEvent(new Event('budgetbuddy:data-refresh'))
+    }
   }, [clearTokens])
 
   const updateProfile = useCallback(async (payload) => {
@@ -61,12 +75,8 @@ export function AuthProvider({ children }) {
       setLoading(false)
       return
     }
-    fetchMe()
-      .catch(() => {
-        clearTokens()
-        setUser(null)
-      })
-      .finally(() => setLoading(false))
+
+    fetchMe().catch(() => {}).finally(() => setLoading(false))
 
     const handleRefresh = () => {
       const currentAccess = localStorage.getItem(TOKEN_KEYS.access)
@@ -76,7 +86,7 @@ export function AuthProvider({ children }) {
     }
     window.addEventListener('budgetbuddy:data-refresh', handleRefresh)
     return () => window.removeEventListener('budgetbuddy:data-refresh', handleRefresh)
-  }, [fetchMe, clearTokens])
+  }, [fetchMe])
 
   const value = useMemo(
     () => ({ user, loading, login, register, logout, updateProfile, fetchMe }),

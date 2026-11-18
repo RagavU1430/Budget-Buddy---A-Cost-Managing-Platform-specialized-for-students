@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     DEBUG: bool = True
     SECRET_KEY: str = "django-insecure-dev-only-change-me"
     JWT_ALGORITHM: str = "HS256"
+    ADMIN_API_KEY: str = ""
 
     @field_validator("DEBUG", mode="before")
     @classmethod

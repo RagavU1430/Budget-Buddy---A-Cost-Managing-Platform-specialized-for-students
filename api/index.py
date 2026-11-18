@@ -20,18 +20,18 @@ async def ensure_db_initialized():
     if _db_initialized:
         return
     _db_initialized = True
-    import os
-    if os.getenv("AUTO_MIGRATE", "").lower() in ("true", "1"):
-        try:
-            from app.db.base import Base
-            from app.db.session import engine
-            from app.db.security_fix import apply_database_security_hardening
+    try:
+        from app.db.session import engine
+        from app.db.security_fix import apply_database_security_hardening
 
-            async with engine.begin() as conn:
-                await conn.run_sync(Base.metadata.create_all)
+        async with engine.begin() as conn:
+            if conn.dialect.name == "postgresql":
                 await apply_database_security_hardening(conn)
-        except Exception as exc:
-            print("Database auto-init error:", exc)
+            else:
+                from app.db.base import Base
+                await conn.run_sync(Base.metadata.create_all)
+    except Exception as exc:
+        print("Database auto-init error:", exc)
 
 
 class VercelPathFixMiddleware:

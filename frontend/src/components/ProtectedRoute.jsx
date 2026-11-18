@@ -3,7 +3,7 @@ import { Wallet } from 'lucide-react'
 
 import { useAuth } from '../context/AuthContext.jsx'
 
-export default function ProtectedRoute() {
+export default function ProtectedRoute({ roles }) {
   const { user, loading } = useAuth()
   const location = useLocation()
 
@@ -26,6 +26,15 @@ export default function ProtectedRoute() {
 
   if (!user) {
     return <Navigate to="/login" state={{ from: location.pathname }} replace />
+  }
+
+  // Role-aware access control
+  if (roles && !user.role) {
+    return <Navigate to="/" replace />
+  }
+
+  if (roles && user.role && !roles.includes(user.role)) {
+    return <Navigate to="/" replace />
   }
 
   return <Outlet />

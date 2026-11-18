@@ -11,6 +11,7 @@ export const TOKEN_KEYS = {
 
 const api = axios.create({
   baseURL: API_BASE_URL,
+  withCredentials: true,
   headers: { 'Content-Type': 'application/json' },
 })
 
@@ -40,16 +41,19 @@ api.interceptors.response.use(
     if (error.response?.status === 401 && original && !original._retried && refresh) {
       original._retried = true
       try {
-        const { data } = await api.post('/auth/refresh/', { refresh })
-        localStorage.setItem(TOKEN_KEYS.access, data.access)
+        const { data } = await api.post('/auth/refresh/', { refresh }, { withCredentials: true })
+        if (data.access) {
+          localStorage.setItem(TOKEN_KEYS.access, data.access)
+          original.headers.Authorization = `Bearer ${data.access}`
+        }
         if (data.refresh) {
           localStorage.setItem(TOKEN_KEYS.refresh, data.refresh)
         }
-        original.headers.Authorization = `Bearer ${data.access}`
         return api(original)
-      } catch {
+      } catch (refreshErr) {
         localStorage.removeItem(TOKEN_KEYS.access)
         localStorage.removeItem(TOKEN_KEYS.refresh)
+        throw refreshErr
       }
     }
     return Promise.reject(error)
