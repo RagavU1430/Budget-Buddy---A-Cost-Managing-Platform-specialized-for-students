@@ -20,33 +20,18 @@ async def ensure_db_initialized():
     if _db_initialized:
         return
     _db_initialized = True
-    try:
-        from app.db.base import Base
-        from app.db.session import engine, SessionLocal
-        from app.services.storage import ensure_local_media_root
-        from sqlalchemy import delete
-        from app.db import models
-
+    import os
+    if os.getenv("AUTO_MIGRATE", "").lower() in ("true", "1"):
         try:
-            ensure_local_media_root()
-        except Exception:
-            pass
+            from app.db.base import Base
+            from app.db.session import engine
+            from app.db.security_fix import apply_database_security_hardening
 
-        from app.db.security_fix import apply_database_security_hardening
-
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
-            await apply_database_security_hardening(conn)
-        async with SessionLocal() as seed_session:
-            demo_emails = [
-                "student@budgetbuddy.local",
-                "premium@budgetbuddy.local",
-                "admin@budgetbuddy.local",
-            ]
-            await seed_session.execute(delete(models.User).where(models.User.email.in_(demo_emails)))
-            await seed_session.commit()
-    except Exception as exc:
-        print("Database auto-init error:", exc)
+            async with engine.begin() as conn:
+                await conn.run_sync(Base.metadata.create_all)
+                await apply_database_security_hardening(conn)
+        except Exception as exc:
+            print("Database auto-init error:", exc)
 
 
 class VercelPathFixMiddleware:

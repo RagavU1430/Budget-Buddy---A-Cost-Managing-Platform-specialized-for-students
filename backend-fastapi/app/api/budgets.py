@@ -12,12 +12,12 @@ from datetime import date
 from typing import Any
 
 from fastapi import APIRouter, Request, Response
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 
 from app.api.deps import CurrentUser, DbSession, json_body, owned_object
 from app.core.errors import APIError
-from app.core.pagination import paginate
+from app.core.pagination import paginate, page_params
 from app.core.serializers import budget_dict
 from app.core.validation import (
     Errors,
@@ -89,9 +89,17 @@ async def list_budgets(request: Request, user: CurrentUser, db: DbSession):
         stmt = stmt.where(models.Budget.category == params["category"])
 
     stmt = stmt.order_by(models.Budget.month.desc(), models.Budget.category)
-    rows = (await db.execute(stmt)).scalars().all()
+    page, size, offset = page_params(request)
+    total = (
+        await db.execute(
+            select(func.count()).select_from(stmt.order_by(None).subquery())
+        )
+    ).scalar_one()
+    rows = (
+        await db.execute(stmt.limit(size).offset(offset))
+    ).scalars().all()
     items = [budget_dict(row) for row in rows]
-    return paginate(request, items, len(rows))
+    return paginate(request, items, total, already_paginated=True)
 
 
 @router.post("/budgets/", status_code=201, response_model=None)

@@ -24,7 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import CurrentUser, DbSession, json_body, owned_object
 from app.core.errors import APIError
-from app.core.pagination import paginate
+from app.core.pagination import paginate, page_params
 from app.core.serializers import dt_iso, expense_dict, income_dict
 from app.core.validation import (
     MISSING,
@@ -241,9 +241,17 @@ async def list_expenses(request: Request, user: CurrentUser, db: DbSession):
     stmt = await _expense_filters(db, user, request)
     if stmt is None:  # bad month -> queryset.none()
         return paginate(request, [], 0)
-    rows = (await db.execute(stmt)).scalars().all()
+    page, size, offset = page_params(request)
+    total = (
+        await db.execute(
+            select(func.count()).select_from(stmt.order_by(None).subquery())
+        )
+    ).scalar_one()
+    rows = (
+        await db.execute(stmt.limit(size).offset(offset))
+    ).scalars().all()
     items = [expense_dict(row) for row in rows]
-    return paginate(request, items, len(rows))
+    return paginate(request, items, total, already_paginated=True)
 
 
 @router.post("/expenses/", status_code=201, response_model=None)
@@ -309,9 +317,17 @@ async def list_incomes(request: Request, user: CurrentUser, db: DbSession):
     stmt = await _income_filters(db, user, request)
     if stmt is None:  # bad month -> queryset.none()
         return paginate(request, [], 0)
-    rows = (await db.execute(stmt)).scalars().all()
+    page, size, offset = page_params(request)
+    total = (
+        await db.execute(
+            select(func.count()).select_from(stmt.order_by(None).subquery())
+        )
+    ).scalar_one()
+    rows = (
+        await db.execute(stmt.limit(size).offset(offset))
+    ).scalars().all()
     items = [income_dict(row) for row in rows]
-    return paginate(request, items, len(rows))
+    return paginate(request, items, total, already_paginated=True)
 
 
 @router.post("/incomes/", status_code=201, response_model=None)

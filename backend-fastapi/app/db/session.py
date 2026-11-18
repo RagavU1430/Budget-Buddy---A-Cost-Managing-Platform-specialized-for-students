@@ -46,10 +46,15 @@ def _connect_args(url: str) -> dict[str, Any]:
 
 
 def _build_engine(url: str) -> AsyncEngine:
+    import os
+    is_serverless = bool(os.getenv("VERCEL") or os.getenv("AWS_LAMBDA_FUNCTION_NAME"))
     return create_async_engine(
         url,
         echo=False,
-        pool_pre_ping=True,
+        pool_pre_ping=not is_serverless,
+        pool_size=2 if is_serverless else 5,
+        max_overflow=5 if is_serverless else 10,
+        pool_recycle=300,
         connect_args=_connect_args(url),
     )
 

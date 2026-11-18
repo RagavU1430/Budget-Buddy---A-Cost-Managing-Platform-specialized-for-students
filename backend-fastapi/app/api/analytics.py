@@ -86,15 +86,21 @@ async def summary(request: Request, user: CurrentUser, db: DbSession):
         max(days - today.day + 1, 1) if month == today.replace(day=1) else days
     )
 
+    category_spent_rows = (
+        await db.execute(
+            select(
+                models.Expense.category,
+                func.coalesce(func.sum(models.Expense.amount), 0),
+            )
+            .where(*expense_scope)
+            .group_by(models.Expense.category)
+        )
+    ).all()
+    category_spent = {category: Decimal(total) for category, total in category_spent_rows}
+
     by_category: list[dict[str, Any]] = []
     for category in models.EXPENSE_CATEGORIES:
-        spent = (
-            await db.execute(
-                select(func.coalesce(func.sum(models.Expense.amount), 0)).where(
-                    *expense_scope, models.Expense.category == category
-                )
-            )
-        ).scalar_one()
+        spent = category_spent.get(category, Decimal("0"))
         budget = budgets_by_category.get(category)
         limit = Decimal(budget.limit_amount) if budget else Decimal("0")
         by_category.append(

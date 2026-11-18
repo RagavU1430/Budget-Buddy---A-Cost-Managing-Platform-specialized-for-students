@@ -24,6 +24,7 @@ def paginate(
     total: int,
     *,
     page_size: int | None = None,
+    already_paginated: bool = False,
 ) -> dict[str, Any]:
     size = page_size or settings.PAGE_SIZE
     raw_page = request.query_params.get("page", "1")
@@ -40,9 +41,24 @@ def paginate(
     if total == 0 and page != 1:
         raise invalid_page()
 
+    page_items = list(items) if already_paginated else list(items)[(page - 1) * size:page * size]
+
     return {
         "count": total,
         "next": _page_url(request, page + 1) if page < num_pages else None,
         "previous": _page_url(request, page - 1) if page > 1 else None,
-        "results": list(items),
+        "results": page_items,
     }
+
+
+def page_params(request: Request) -> tuple[int, int, int]:
+    """Return (page, page_size, offset) and validate the page number."""
+    size = settings.PAGE_SIZE
+    raw_page = request.query_params.get("page", "1")
+    try:
+        page = int(raw_page)
+    except (TypeError, ValueError):
+        raise invalid_page()
+    if page < 1:
+        raise invalid_page()
+    return page, size, (page - 1) * size

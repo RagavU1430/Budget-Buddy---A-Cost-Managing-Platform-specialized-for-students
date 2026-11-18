@@ -35,25 +35,14 @@ async def lifespan(app: FastAPI):
     except Exception:
         pass
 
-    # Automatically initialize tables and security policies in production Supabase / Postgres
-    try:
-        from app.db.security_fix import apply_database_security_hardening
-
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
-            await apply_database_security_hardening(conn)
-        from app.db.session import SessionLocal
-        from sqlalchemy import delete
-        async with SessionLocal() as session:
-            demo_emails = [
-                "student@budgetbuddy.local",
-                "premium@budgetbuddy.local",
-                "admin@budgetbuddy.local",
-            ]
-            await session.execute(delete(models.User).where(models.User.email.in_(demo_emails)))
-            await session.commit()
-    except Exception:
-        pass
+    # Initialize tables for local development SQLite or when AUTO_MIGRATE is enabled.
+    # In production serverless PostgreSQL, skip schema introspection to ensure instantaneous cold starts.
+    if settings.DATABASE_URL.startswith("sqlite") or os.getenv("AUTO_MIGRATE", "").lower() in ("true", "1"):
+        try:
+            async with engine.begin() as conn:
+                await conn.run_sync(Base.metadata.create_all)
+        except Exception:
+            pass
 
     yield
 
