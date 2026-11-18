@@ -171,13 +171,12 @@ def _base_email_template(title: str, preheader: str, body_content: str) -> str:
 def _send_smtp_sync(to_email: str, subject: str, html_body: str, text_body: str) -> bool:
     """Synchronous SMTP worker intended to run in a background thread."""
     if not _is_smtp_configured():
-        logger.info(
-            "[EMAIL SIMULATION] To: %s | Subject: %s | SMTP not configured, logging email body:\n%s",
+        logger.warning(
+            "[EMAIL NOTICE] SMTP not configured. Cannot send email to %s (Subject: %s).",
             to_email,
             subject,
-            text_body,
         )
-        return True
+        return False
 
     from_email = settings.SMTP_FROM_EMAIL or settings.SMTP_USERNAME or "no-reply@budgetbuddy.app"
 
@@ -249,8 +248,8 @@ Expires in: 10 minutes
 If you didn't request this, please ignore this email.
 """
     if not _is_smtp_configured():
-        logger.info("[EMAIL SIMULATION] Verification code for %s is %s", to_email, code)
-        return True
+        logger.warning("[SMTP UNCONFIGURED] Cannot send verification code to %s: SMTP is not configured.", to_email)
+        return False
 
     try:
         sent = await asyncio.to_thread(

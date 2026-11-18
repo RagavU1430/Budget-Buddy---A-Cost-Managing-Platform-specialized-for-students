@@ -755,6 +755,23 @@ async def request_email_change(request: Request, user: CurrentUser, db: DbSessio
         email_sent = await send_verification_code(new_email, code)
     except Exception as exc:
         logger.warning(f"Error during verification email send: {exc}")
+        email_sent = False
+
+    from app.services.email import _is_smtp_configured
+    if not email_sent:
+        if not _is_smtp_configured():
+            raise APIError(
+                503,
+                {
+                    "detail": "Email service (SMTP) is not configured on the server. Please configure SMTP credentials to send verification codes to your email.",
+                },
+            )
+        raise APIError(
+            502,
+            {
+                "detail": f"Failed to deliver verification code email to {new_email}. Please check your SMTP settings or try again.",
+            },
+        )
 
     try:
         await db.execute(delete(models.EmailChangeRequest).where(
@@ -783,21 +800,12 @@ async def request_email_change(request: Request, user: CurrentUser, db: DbSessio
         ))
         await db.commit()
 
-    resp = {
-        "detail": "Verification code sent.",
+    return {
+        "detail": f"Verification code sent to {new_email}. Please check your inbox.",
         "email": new_email,
         "expires_in_seconds": 600,
         "changes_remaining": max(0, 2 - change_count),
     }
-
-    from app.services.email import _is_smtp_configured
-    if not _is_smtp_configured() or not email_sent:
-        resp["dev_code"] = code
-        resp["smtp_configured"] = False
-    else:
-        resp["smtp_configured"] = True
-
-    return resp
 
 
 @router.post("/email-change/verify/", response_model=None)

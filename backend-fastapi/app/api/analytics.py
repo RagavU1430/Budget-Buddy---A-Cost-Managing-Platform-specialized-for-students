@@ -59,24 +59,74 @@ async def summary(request: Request, user: CurrentUser, db: DbSession):
         models.Income.date < next_month_start,
     )
 
-    total_expense = (
-        await db.execute(
-            select(func.coalesce(func.sum(models.Expense.amount), 0)).where(*expense_scope)
-        )
-    ).scalar_one()
-    total_income = (
-        await db.execute(
-            select(func.coalesce(func.sum(models.Income.amount), 0)).where(*income_scope)
-        )
-    ).scalar_one()
+    # Batch all aggregation queries in a single round-trip using asyncio.gather
+    import asyncio
 
-    budget_rows = (
-        await db.execute(
-            select(models.Budget).where(
-                models.Budget.user_id == user.id, models.Budget.month == month_start
-            )
+    total_expense_task = db.execute(
+        select(func.coalesce(func.sum(models.Expense.amount), 0)).where(*expense_scope)
+    )
+    total_income_task = db.execute(
+        select(func.coalesce(func.sum(models.Income.amount), 0)).where(*income_scope)
+    )
+    budget_rows_task = db.execute(
+        select(models.Budget).where(
+            models.Budget.user_id == user.id, models.Budget.month == month_start
         )
-    ).scalars().all()
+    )
+    category_spent_rows_task = db.execute(
+        select(
+            models.Expense.category,
+            func.coalesce(func.sum(models.Expense.amount), 0),
+        )
+        .where(*expense_scope)
+        .group_by(models.Expense.category)
+    )
+    top_row_task = db.execute(
+        select(models.Expense)
+        .where(*expense_scope)
+        .order_by(models.Expense.amount.desc())
+        .limit(1)
+    )
+    payment_rows_task = db.execute(
+        select(models.Expense.payment_method, func.sum(models.Expense.amount))
+        .where(*expense_scope)
+        .group_by(models.Expense.payment_method)
+        .order_by(models.Expense.payment_method)
+    )
+    source_rows_task = db.execute(
+        select(models.Income.source_type, func.sum(models.Income.amount))
+        .where(*income_scope)
+        .group_by(models.Income.source_type)
+        .order_by(models.Income.source_type)
+    )
+    recent_rows_task = db.execute(
+        select(models.Expense)
+        .where(*expense_scope)
+        .order_by(models.Expense.date.desc(), models.Expense.created_at.desc())
+        .limit(5)
+    )
+
+    # Execute all queries concurrently
+    results = await asyncio.gather(
+        total_expense_task,
+        total_income_task,
+        budget_rows_task,
+        category_spent_rows_task,
+        top_row_task,
+        payment_rows_task,
+        source_rows_task,
+        recent_rows_task,
+    )
+
+    total_expense = results[0].scalar_one()
+    total_income = results[1].scalar_one()
+    budget_rows = results[2].scalars().all()
+    category_spent_rows = results[3].all()
+    top_row = results[4].scalars().first()
+    payment_rows = results[5].all()
+    source_rows = results[6].all()
+    recent_rows = results[7].scalars().all()
+
     budgets_by_category = {budget.category: budget for budget in budget_rows}
     total_budget = sum((Decimal(b.limit_amount) for b in budget_rows), Decimal("0"))
 
@@ -86,16 +136,6 @@ async def summary(request: Request, user: CurrentUser, db: DbSession):
         max(days - today.day + 1, 1) if month == today.replace(day=1) else days
     )
 
-    category_spent_rows = (
-        await db.execute(
-            select(
-                models.Expense.category,
-                func.coalesce(func.sum(models.Expense.amount), 0),
-            )
-            .where(*expense_scope)
-            .group_by(models.Expense.category)
-        )
-    ).all()
     category_spent = {category: Decimal(total) for category, total in category_spent_rows}
 
     by_category: list[dict[str, Any]] = []
@@ -120,41 +160,6 @@ async def summary(request: Request, user: CurrentUser, db: DbSession):
                 "share_pct": share_pct,
             }
         )
-
-    top_row = (
-        await db.execute(
-            select(models.Expense)
-            .where(*expense_scope)
-            .order_by(models.Expense.amount.desc())
-            .limit(1)
-        )
-    ).scalars().first()
-
-    payment_rows = (
-        await db.execute(
-            select(models.Expense.payment_method, func.sum(models.Expense.amount))
-            .where(*expense_scope)
-            .group_by(models.Expense.payment_method)
-            .order_by(models.Expense.payment_method)
-        )
-    ).all()
-    source_rows = (
-        await db.execute(
-            select(models.Income.source_type, func.sum(models.Income.amount))
-            .where(*income_scope)
-            .group_by(models.Income.source_type)
-            .order_by(models.Income.source_type)
-        )
-    ).all()
-
-    recent_rows = (
-        await db.execute(
-            select(models.Expense)
-            .where(*expense_scope)
-            .order_by(models.Expense.date.desc(), models.Expense.created_at.desc())
-            .limit(5)
-        )
-    ).scalars().all()
 
     net = Decimal(total_income) - Decimal(total_expense)
     return {
@@ -241,28 +246,38 @@ def _month_offsets(count: int) -> list[tuple[int, int]]:
 @router.get("/analytics/trends/", response_model=None)
 async def analytics_trends(request: Request, user: CurrentUser, db: DbSession):
     count = _months_param(request, 6)
-    rows: list[dict[str, Any]] = []
+
+    # Build all month ranges first
+    months = _month_offsets(count)
+    month_bounds_list = []
+    for year, month in months:
+        month_start = date(year, month, 1)
+        _, next_month_start = month_bounds(month_start)
+        month_bounds_list.append((year, month, month_start, next_month_start))
+
+    # Execute all trend row queries concurrently
+    import asyncio
+    trend_tasks = [
+        _trend_row(db, user, year, month, month_start, next_month_start)
+        for year, month, month_start, next_month_start in month_bounds_list
+    ]
+
     try:
-        for year, month in _month_offsets(count):
-            month_start = date(year, month, 1)
-            _, next_month_start = month_bounds(month_start)
-            rows.append(
-                await _trend_row(db, user, year, month, month_start, next_month_start)
-            )
+        rows = await asyncio.gather(*trend_tasks)
     except Exception as exc:
         import logging
         logging.getLogger("budgetbuddy.analytics").warning("Error computing analytics trends: %s", exc)
-        if not rows:
-            for year, month in _month_offsets(count):
-                first = date(year, month, 1)
-                rows.append({
-                    "month": first.isoformat(),
-                    "month_label": first.strftime("%b %Y"),
-                    "income": 0.0,
-                    "expense": 0.0,
-                    "net": 0.0,
-                    "budget": 0.0,
-                })
+        rows = []
+        for year, month in months:
+            first = date(year, month, 1)
+            rows.append({
+                "month": first.isoformat(),
+                "month_label": first.strftime("%b %Y"),
+                "income": 0.0,
+                "expense": 0.0,
+                "net": 0.0,
+                "budget": 0.0,
+            })
     return rows
 
 

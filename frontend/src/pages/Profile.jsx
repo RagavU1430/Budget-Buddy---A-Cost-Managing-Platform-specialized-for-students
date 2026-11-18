@@ -230,15 +230,11 @@ export default function Profile() {
     try {
       const { data } = await api.post('/auth/email-change/request/', { email: newEmail })
       setEmailStep('code')
-      if (data.dev_code) {
-        setEmailCode(data.dev_code)
-        setEmailStatus({
-          message: `Verification code: ${data.dev_code} (SMTP offline on server - code auto-filled)`,
-          type: 'success',
-        })
-      } else {
-        setEmailStatus({ message: data.detail || `Verification code sent to ${newEmail}.`, type: 'success' })
-      }
+      setEmailCode('')
+      setEmailStatus({
+        message: data.detail || `A 6-digit verification code has been sent to ${newEmail}. Please check your inbox.`,
+        type: 'success',
+      })
     } catch (err) {
       setEmailStatus({ message: formatError(err), type: 'error' })
     } finally {

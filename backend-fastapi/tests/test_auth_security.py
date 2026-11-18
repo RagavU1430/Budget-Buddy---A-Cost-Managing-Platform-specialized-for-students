@@ -954,32 +954,31 @@ class TestGeneralSecurity:
     async def test_admin_user_stats_requires_key(
         self, async_client: httpx.AsyncClient
     ):
-        """Test that user-stats endpoint works with DEBUG=True (development mode).
+        """Test that user-stats endpoint works with DEBUG=True and requires key when DEBUG=False."""
+        with patch.object(settings, "DEBUG", True):
+            response = await async_client.get("/api/auth/user-stats/")
+            assert response.status_code == 200
 
-        When DEBUG=True, the endpoint is intentionally open for development purposes.
-        In production with DEBUG=False, the key="budgetbuddy_admin" query param is required.
-        """
-        # In DEBUG mode, no key is required
-        response = await async_client.get("/api/auth/user-stats/")
-        assert response.status_code == 200
-
-        # With the admin key it should also work
-        response = await async_client.get("/api/auth/user-stats/?key=budgetbuddy_admin")
-        assert response.status_code == 200
+        with patch.object(settings, "DEBUG", False):
+            response = await async_client.get("/api/auth/user-stats/")
+            assert response.status_code == 403
+            response = await async_client.get("/api/auth/user-stats/?key=budgetbuddy_admin")
+            assert response.status_code == 200
 
     @pytest.mark.asyncio
     async def test_security_fix_endpoint_requires_key(
         self, async_client: httpx.AsyncClient
     ):
-        """Test that security-fix endpoint behavior varies by DEBUG setting.
+        """Test that security-fix endpoint behavior varies by DEBUG setting."""
+        with patch.object(settings, "DEBUG", True):
+            response = await async_client.post("/api/auth/security-fix/")
+            assert response.status_code == 200
 
-        When DEBUG=True, the endpoint is open for development debugging.
-        When DEBUG=False, key="budgetbuddy_admin" is required.
-        """
-        # In DEBUG mode, endpoint is open
-        response = await async_client.post("/api/auth/security-fix/")
-        # In DEBUG mode, this should succeed
-        assert response.status_code == 200
+        with patch.object(settings, "DEBUG", False):
+            response = await async_client.post("/api/auth/security-fix/")
+            assert response.status_code == 403
+            response = await async_client.post("/api/auth/security-fix/?key=budgetbuddy_admin")
+            assert response.status_code == 200
 
 
 # =============================================================================

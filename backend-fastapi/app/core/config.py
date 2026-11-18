@@ -20,7 +20,7 @@ class Settings(BaseSettings):
 
     # Core
     APP_NAME: str = "budgetbuddy-api"
-    DEBUG: bool = True
+    DEBUG: bool = False
     SECRET_KEY: str = "django-insecure-dev-only-change-me"
     JWT_ALGORITHM: str = "HS256"
     ADMIN_API_KEY: str = ""
@@ -33,8 +33,8 @@ class Settings(BaseSettings):
             return clean in ("true", "1", "t", "yes", "y", "debug", "development")
         return bool(v)
 
-    # Database (SQLAlchemy async URL)
-    DATABASE_URL: str = "sqlite+aiosqlite:///./budgetbuddy.db"
+    # Database (SQLAlchemy async URL) - Supabase PostgreSQL is mandatory
+    DATABASE_URL: str = ""
     # Optional direct (non-pooled) URL for Alembic. Falls back to DATABASE_URL.
     DIRECT_DATABASE_URL: str | None = None
 
@@ -46,9 +46,15 @@ class Settings(BaseSettings):
             or os.getenv("DATABASE_URL")
             or os.getenv("POSTGRES_URL")
             or os.getenv("POSTGRES_PRISMA_URL")
-            or "sqlite+aiosqlite:///./budgetbuddy.db"
+            or ""
         )
         url = str(raw).strip()
+
+        if not url:
+            raise ValueError(
+                "DATABASE_URL is required. Supabase PostgreSQL is mandatory. "
+                "Set DATABASE_URL=postgresql+asyncpg://postgres:password@host:5432/dbname"
+            )
 
         # Strip sslmode query parameter so asyncpg handles SSL via connect_args cleanly
         if "sslmode=" in url:
@@ -63,13 +69,17 @@ class Settings(BaseSettings):
         elif url.startswith("postgresql://") and not url.startswith("postgresql+asyncpg://"):
             url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
 
-        # In serverless environments without cloud Postgres, route SQLite to writable /tmp
+        # In serverless environments, ensure proper SSL handling
         if (
             (os.getenv("VERCEL") or os.getenv("AWS_LAMBDA_FUNCTION_NAME"))
-            and "sqlite" in url
-            and not url.startswith("sqlite+aiosqlite:////tmp/")
+            and "postgresql" in url
         ):
-            return "sqlite+aiosqlite:////tmp/budgetbuddy.db"
+            # Ensure SSL mode is set for serverless Postgres connections
+            if "?" not in url:
+                url += "?sslmode=require"
+            elif "sslmode=" not in url:
+                url += "&sslmode=require"
+
         return url
 
     @field_validator("LOCAL_STORAGE_DIR", mode="before")

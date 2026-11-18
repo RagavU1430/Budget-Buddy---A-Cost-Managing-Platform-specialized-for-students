@@ -1,5 +1,11 @@
-# Budget Buddy - Render Full-Stack Deployment Configuration
+# Budget Buddy - Render Full-Stack Deployment with Supabase
 # Deploy this file by connecting your GitHub repo to Render
+#
+# IMPORTANT: This configuration uses Supabase PostgreSQL as the primary database.
+# Set the following environment variables in Render Dashboard:
+# - DATABASE_URL: postgresql+asyncpg://postgres:password@your-project.supabase.co:5432/postgres
+# - ADMIN_API_KEY: (generate secure random value)
+# - SUPABASE_S3_* credentials for storage
 
 services:
   # Backend FastAPI Service
@@ -15,21 +21,22 @@ services:
     healthCheckPath: /api/health/
     envVars:
       - key: DATABASE_URL
-        # Use PostgreSQL database (see below)
-        fromDatabase:
-          name: budgetbuddy-db
-          property: connectionString
+        sync: false
+        description: "Supabase PostgreSQL connection string (required)"
       - key: SECRET_KEY
         sync: false
         generateValue: true
         description: "Secret key for JWT token signing"
+      - key: ADMIN_API_KEY
+        sync: false
+        description: "Admin API key for security endpoints"
       - key: GEMINI_API_KEY
         sync: false
         description: "Google Gemini API key for AI assistant"
       - key: CORS_ORIGINS
         value: 'https://budgetbuddy-student.vercel.app,https://frontend-iota-black-70.vercel.app,http://localhost:5173,https://budgetbuddy-frontend.onrender.com'
       - key: STORAGE_BACKEND
-        value: 'local'
+        value: 'supabase'
       - key: DEBUG
         value: 'false'
       - key: SMTP_HOST
@@ -49,6 +56,19 @@ services:
         value: 'true'
       - key: LOCAL_STORAGE_DIR
         value: '/app/media'
+      - key: SUPABASE_S3_ENDPOINT
+        sync: false
+        description: "Supabase S3 endpoint"
+      - key: SUPABASE_S3_REGION
+        value: 'ap-southeast-1'
+      - key: SUPABASE_S3_ACCESS_KEY_ID
+        sync: false
+      - key: SUPABASE_S3_SECRET_ACCESS_KEY
+        sync: false
+      - key: SUPABASE_STORAGE_BUCKET
+        value: 'reports'
+      - key: SUPABASE_SIGNED_URL_TTL
+        value: '300'
     autoDeploy: true
     branches:
       main:
@@ -74,12 +94,8 @@ services:
       main:
         enabled: true
 
-# Render PostgreSQL Database
-databases:
-  - name: budgetbuddy-db
-    region: oregon
-    plan: free
-    postgresVersion: "15"
+# Note: Supabase PostgreSQL is used instead of Render's managed PostgreSQL
+# databases section removed - use Supabase for database
 
 # Background worker for notifications (optional - for production)
 # - type: background-library

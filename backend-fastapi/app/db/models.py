@@ -136,6 +136,10 @@ class Expense(TimestampMixin, Base):
     __table_args__ = (
         Index("ix_expense_user_date", "user_id", "date"),
         Index("ix_expense_user_category", "user_id", "category"),
+        # Composite index for analytics queries (user + date range + category)
+        Index("ix_expense_user_date_category", "user_id", "date", "category"),
+        # For payment method filtering
+        Index("ix_expense_user_date_payment", "user_id", "date", "payment_method"),
     )
 
     id: Mapped[int] = mapped_column(BigPK, primary_key=True, autoincrement=True)
@@ -157,6 +161,8 @@ class Income(TimestampMixin, Base):
     __table_args__ = (
         Index("ix_income_user_date", "user_id", "date"),
         Index("ix_income_user_source", "user_id", "source_type"),
+        # Composite index for analytics queries
+        Index("ix_income_user_date_source", "user_id", "date", "source_type"),
     )
 
     id: Mapped[int] = mapped_column(BigPK, primary_key=True, autoincrement=True)
@@ -179,6 +185,8 @@ class Budget(TimestampMixin, Base):
     __table_args__ = (
         UniqueConstraint("user_id", "month", "category", name="uq_budget_user_month_category"),
         Index("ix_budget_user_month", "user_id", "month"),
+        # For analytics queries joining budgets with expenses
+        Index("ix_budget_user_month_category", "user_id", "month", "category"),
     )
 
     id: Mapped[int] = mapped_column(BigPK, primary_key=True, autoincrement=True)
