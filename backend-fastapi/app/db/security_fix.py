@@ -80,8 +80,8 @@ async def apply_database_security_hardening(conn: AsyncConnection) -> dict[str, 
     status_list: list[dict[str, Any]] = []
 
     for tablename, rowsecurity in tables:
-        # Enable FORCE RLS on each table in public schema
-        # FORCE ensures RLS is enabled even if the user is the table owner
+        # Enable and FORCE RLS on each table in public schema
+        await conn.execute(text(f'ALTER TABLE public."{tablename}" ENABLE ROW LEVEL SECURITY'))
         await conn.execute(text(f'ALTER TABLE public."{tablename}" FORCE ROW LEVEL SECURITY'))
 
         # Revoke direct table permissions from anon & authenticated
