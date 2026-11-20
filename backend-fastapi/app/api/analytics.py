@@ -246,24 +246,15 @@ def _month_offsets(count: int) -> list[tuple[int, int]]:
 @router.get("/analytics/trends/", response_model=None)
 async def analytics_trends(request: Request, user: CurrentUser, db: DbSession):
     count = _months_param(request, 6)
-
-    # Build all month ranges first
+    rows: list[dict[str, Any]] = []
     months = _month_offsets(count)
-    month_bounds_list = []
-    for year, month in months:
-        month_start = date(year, month, 1)
-        _, next_month_start = month_bounds(month_start)
-        month_bounds_list.append((year, month, month_start, next_month_start))
-
-    # Execute all trend row queries concurrently
-    import asyncio
-    trend_tasks = [
-        _trend_row(db, user, year, month, month_start, next_month_start)
-        for year, month, month_start, next_month_start in month_bounds_list
-    ]
-
     try:
-        rows = await asyncio.gather(*trend_tasks)
+        for year, month in months:
+            month_start = date(year, month, 1)
+            _, next_month_start = month_bounds(month_start)
+            rows.append(
+                await _trend_row(db, user, year, month, month_start, next_month_start)
+            )
     except Exception as exc:
         import logging
         logging.getLogger("budgetbuddy.analytics").warning("Error computing analytics trends: %s", exc)

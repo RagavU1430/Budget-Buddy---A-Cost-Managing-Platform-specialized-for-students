@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
 
-import api from '../api/client.js'
+import api, { TOKEN_KEYS } from '../api/client.js'
 
 const AuthContext = createContext(null)
 
@@ -22,6 +22,8 @@ export function AuthProvider({ children }) {
   const login = useCallback(
     async ({ email, password }) => {
       const { data } = await api.post('/auth/login/', { email, password })
+      if (data.access) localStorage.setItem(TOKEN_KEYS.access, data.access)
+      if (data.refresh) localStorage.setItem(TOKEN_KEYS.refresh, data.refresh)
       setUser(data.user)
       return data.user
     },
@@ -31,6 +33,8 @@ export function AuthProvider({ children }) {
   const register = useCallback(
     async (payload) => {
       const { data } = await api.post('/auth/register/', payload)
+      if (data.access) localStorage.setItem(TOKEN_KEYS.access, data.access)
+      if (data.refresh) localStorage.setItem(TOKEN_KEYS.refresh, data.refresh)
       setUser(data.user)
       return data.user
     },
@@ -44,6 +48,8 @@ export function AuthProvider({ children }) {
     } catch {
       // Ignore logout errors
     }
+    localStorage.removeItem(TOKEN_KEYS.access)
+    localStorage.removeItem(TOKEN_KEYS.refresh)
     setUser(null)
     // Trigger a refresh to clear any cached state
     window.dispatchEvent(new Event('budgetbuddy:data-refresh'))
@@ -69,7 +75,10 @@ export function AuthProvider({ children }) {
     checkAuth()
 
     const handleRefresh = () => {
-      fetchMe().catch(() => {})
+      const currentAccess = localStorage.getItem(TOKEN_KEYS.access)
+      if (currentAccess) {
+        fetchMe().catch(() => {})
+      }
     }
     window.addEventListener('budgetbuddy:data-refresh', handleRefresh)
     return () => window.removeEventListener('budgetbuddy:data-refresh', handleRefresh)
