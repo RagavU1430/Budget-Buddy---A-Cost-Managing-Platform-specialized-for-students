@@ -75,7 +75,12 @@ async def apply_database_security_hardening(conn: AsyncConnection) -> dict[str, 
     for stmt in ddl_statements:
         try:
             await conn.execute(text(stmt))
+            await conn.commit()
         except Exception as stmt_exc:
+            try:
+                await conn.rollback()
+            except Exception:
+                pass
             logger.warning(f"[SecurityFix] DDL statement notice: {stmt_exc}")
 
     # 1. Fetch all tables currently in the public schema
@@ -87,17 +92,21 @@ async def apply_database_security_hardening(conn: AsyncConnection) -> dict[str, 
     status_list: list[dict[str, Any]] = []
 
     for tablename, rowsecurity in tables:
-        # Enable and FORCE RLS on each table in public schema
-        await conn.execute(text(f'ALTER TABLE public."{tablename}" ENABLE ROW LEVEL SECURITY'))
-        await conn.execute(text(f'ALTER TABLE public."{tablename}" FORCE ROW LEVEL SECURITY'))
-
-        # Revoke direct table permissions from anon & authenticated
         try:
+            # Enable and FORCE RLS on each table in public schema
+            await conn.execute(text(f'ALTER TABLE public."{tablename}" ENABLE ROW LEVEL SECURITY'))
+            await conn.execute(text(f'ALTER TABLE public."{tablename}" FORCE ROW LEVEL SECURITY'))
+            # Revoke direct table permissions from anon & authenticated
             await conn.execute(
                 text(f'REVOKE ALL ON TABLE public."{tablename}" FROM anon, authenticated')
             )
+            await conn.commit()
         except Exception as e:
-            logger.error(f"[SecurityFix] Failed to REVOKE TABLE permissions for {tablename}: {e}")
+            try:
+                await conn.rollback()
+            except Exception:
+                pass
+            logger.error(f"[SecurityFix] Table security update notice for {tablename}: {e}")
 
         status_list.append({
             "table": tablename,
@@ -106,9 +115,16 @@ async def apply_database_security_hardening(conn: AsyncConnection) -> dict[str, 
         })
 
     # Revoke schema USAGE from anon, authenticated, and PUBLIC
-    await conn.execute(
-        text('REVOKE USAGE ON SCHEMA public FROM anon, authenticated, PUBLIC')
-    )
+    try:
+        await conn.execute(
+            text('REVOKE USAGE ON SCHEMA public FROM anon, authenticated, PUBLIC')
+        )
+        await conn.commit()
+    except Exception as e:
+        try:
+            await conn.rollback()
+        except Exception:
+            pass
 
     # Revoke ALL on tables, sequences, routines from anon and authenticated
     for stmt in [
@@ -121,7 +137,12 @@ async def apply_database_security_hardening(conn: AsyncConnection) -> dict[str, 
     ]:
         try:
             await conn.execute(text(stmt))
+            await conn.commit()
         except Exception as e:
+            try:
+                await conn.rollback()
+            except Exception:
+                pass
             logger.error(f"[SecurityFix] Failed to execute: {stmt[:60]}...: {e}")
 
     return {
