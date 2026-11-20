@@ -74,9 +74,11 @@ def _values(
     elif not partial:
         values["description"] = ""
 
-    # target_amount — DecimalField(max_digits=12, decimal_places=2, required)
+    # target_amount — DecimalField(max_digits=16, decimal_places=2, required)
     if "target_amount" in body:
-        values["target_amount"] = errors.run(validate_decimal, body, "target_amount")
+        values["target_amount"] = errors.run(
+            validate_decimal, body, "target_amount", max_digits=16, decimal_places=2, min_value=Decimal("0.01")
+        )
     elif not partial:
         errors.add("target_amount", "This field is required.")
 
@@ -132,7 +134,7 @@ def _target_date(body: dict[str, Any], field: str):
 def _saved_amount(body: dict[str, Any], field: str):
     from app.core.validation import validate_decimal
 
-    return validate_decimal(body, field)
+    return validate_decimal(body, field, max_digits=16, decimal_places=2, min_value=Decimal("0.00"))
 
 
 def _cross_validation(
@@ -237,6 +239,9 @@ async def deposit_goal(pk: str, request: Request, user: CurrentUser, db: DbSessi
         raise APIError(400, {"amount": "A valid amount is required."})
     if amount <= 0:
         raise APIError(400, {"amount": "Amount must be positive."})
+    MAX_AMOUNT = Decimal("99999999999999.99")
+    if amount > MAX_AMOUNT or (Decimal(goal.current_amount or 0) + amount) > MAX_AMOUNT:
+        raise APIError(400, {"amount": "Amount exceeds maximum supported limit."})
 
     goal.current_amount += amount
     goal.sync_completion()

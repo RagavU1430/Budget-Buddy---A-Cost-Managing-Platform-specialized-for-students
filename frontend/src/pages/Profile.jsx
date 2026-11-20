@@ -572,6 +572,7 @@ export default function Profile() {
                       name="monthly_income"
                       type="number"
                       min="0"
+                      max="99999999999999"
                       step="1"
                       required
                       placeholder="50000"

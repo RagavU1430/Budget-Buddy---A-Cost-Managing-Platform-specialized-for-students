@@ -88,10 +88,12 @@ def validate_decimal(
     data: Mapping[str, Any],
     field: str,
     *,
-    max_digits: int = 12,
+    max_digits: int = 16,
     decimal_places: int = 2,
     required: bool = True,
     default: Decimal | object = MISSING,
+    min_value: Decimal | None = None,
+    max_value: Decimal | None = None,
 ) -> Decimal:
     if not _present(data, field):
         if default is not MISSING:
@@ -117,10 +119,30 @@ def validate_decimal(
         raise validation_error(
             {field: [f"Ensure that there are no more than {decimal_places} decimal places."]}
         )
+
+    # Check whole digits before the decimal point to prevent database numeric overflow
+    max_whole_digits = max_digits - decimal_places
+    whole_digits = len(digits) + exponent if isinstance(exponent, int) and (len(digits) + exponent > 0) else 0
+    if whole_digits > max_whole_digits:
+        raise validation_error(
+            {field: [f"Ensure that there are no more than {max_whole_digits} digits before the decimal point."]}
+        )
+
     if len(digits) > max_digits:
         raise validation_error(
             {field: [f"Ensure that there are no more than {max_digits} digits in total."]}
         )
+
+    if min_value is not None and value < min_value:
+        raise validation_error(
+            {field: [f"Ensure this value is greater than or equal to {min_value}."]}
+        )
+
+    if max_value is not None and value > max_value:
+        raise validation_error(
+            {field: [f"Ensure this value is less than or equal to {max_value}."]}
+        )
+
     return value
 
 

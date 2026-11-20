@@ -514,13 +514,22 @@ def _profile_field_errors(body: dict[str, Any]) -> dict[str, list[str]]:
                 errors.setdefault("monthly_income", []).append("A valid number is required.")
             else:
                 _, digits, exponent = parsed.as_tuple()
+                whole_digits = len(digits) + exponent if isinstance(exponent, int) and (len(digits) + exponent > 0) else 0
                 if isinstance(exponent, int) and exponent < -2:
                     errors.setdefault("monthly_income", []).append(
                         "Ensure that there are no more than 2 decimal places."
                     )
-                elif len(digits) > 12:
+                elif whole_digits > 14:
                     errors.setdefault("monthly_income", []).append(
-                        "Ensure that there are no more than 12 digits in total."
+                        "Ensure that there are no more than 14 digits before the decimal point."
+                    )
+                elif len(digits) > 16:
+                    errors.setdefault("monthly_income", []).append(
+                        "Ensure that there are no more than 16 digits in total."
+                    )
+                elif parsed < 0:
+                    errors.setdefault("monthly_income", []).append(
+                        "Ensure this value is greater than or equal to 0."
                     )
 
     if "currency" in body:

@@ -9,6 +9,7 @@ DRF-envelope body — a documented, deliberate deviation.
 from __future__ import annotations
 
 from datetime import date
+from decimal import Decimal
 from typing import Any
 
 from fastapi import APIRouter, Request, Response
@@ -66,11 +67,13 @@ def _values(body: dict[str, Any], partial: bool) -> tuple[Errors, dict[str, Any]
     elif not partial:
         values["category"] = "misc"
 
-    # limit_amount — DecimalField(max_digits=12, decimal_places=2, default=0)
+    # limit_amount — DecimalField(max_digits=16, decimal_places=2, default=0)
     if "limit_amount" in body:
-        values["limit_amount"] = errors.run(validate_decimal, body, "limit_amount")
+        values["limit_amount"] = errors.run(
+            validate_decimal, body, "limit_amount", max_digits=16, decimal_places=2, min_value=Decimal("0.00")
+        )
     elif not partial:
-        values["limit_amount"] = 0
+        values["limit_amount"] = Decimal("0")
 
     return errors, values
 

@@ -88,6 +88,50 @@ async def api_error_handler(request: Request, exc: APIError):
     return JSONResponse(status_code=exc.status_code, content=exc.body, headers=_cors_headers(request))
 
 
+# Exception handler for database data capacity / overflow errors
+from sqlalchemy.exc import DBAPIError, DataError
+
+
+@app.exception_handler(DataError)
+async def data_error_handler(request: Request, exc: DataError):
+    exc_str = str(exc).lower()
+    if "numeric field overflow" in exc_str:
+        return JSONResponse(
+            status_code=400,
+            content={
+                "detail": "The amount entered is too large and exceeds the maximum supported limit.",
+                "amount": ["Ensure that there are no more than 14 digits before the decimal point."],
+            },
+            headers=_cors_headers(request),
+        )
+    return JSONResponse(
+        status_code=400,
+        content={"detail": "A provided value exceeds database field capacity.", "error": str(exc)},
+        headers=_cors_headers(request),
+    )
+
+
+@app.exception_handler(DBAPIError)
+async def dbapi_error_handler(request: Request, exc: DBAPIError):
+    exc_str = str(exc).lower()
+    if "numeric field overflow" in exc_str:
+        return JSONResponse(
+            status_code=400,
+            content={
+                "detail": "The amount entered is too large and exceeds the maximum supported limit.",
+                "amount": ["Ensure that there are no more than 14 digits before the decimal point."],
+            },
+            headers=_cors_headers(request),
+        )
+    import traceback
+    traceback.print_exc()
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "An internal server error occurred.", "error": str(exc)},
+        headers=_cors_headers(request),
+    )
+
+
 # Catch-all exception handler to ensure CORS headers are preserved on unhandled errors
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(request: Request, exc: Exception):

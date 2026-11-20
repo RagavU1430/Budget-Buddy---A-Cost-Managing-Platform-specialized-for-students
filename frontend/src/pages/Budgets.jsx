@@ -6,6 +6,7 @@ import { getExpenses } from '../api/expenses'
 import { formatCurrency, getCurrentMonthFirstDay } from '../utils/format'
 import ProgressBar from '../components/ProgressBar'
 import Modal from '../components/Modal'
+import Alert from '../components/Alert'
 import FormField, { inputClass } from '../components/FormField'
 import { SkeletonCard } from '../components/Skeleton'
 import { EXPENSE_CATEGORIES, categoryMeta, toneClasses } from '../utils/categories'
@@ -16,6 +17,8 @@ export default function Budgets() {
   const [modalOpen, setModalOpen] = useState(false)
   const [form, setForm] = useState({ category: 'food', limit_amount: '', month: getCurrentMonthFirstDay() })
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const [saving, setSaving] = useState(false)
 
   const normalize = (data) => {
     if (Array.isArray(data)) return data
@@ -68,10 +71,27 @@ export default function Budgets() {
 
   const handleSubmit = async (e) => {
     e.preventDefault()
-    await createBudget({ ...form, limit_amount: Number(form.limit_amount) })
-    setModalOpen(false)
-    setForm({ category: 'food', limit_amount: '', month: getCurrentMonthFirstDay() })
-    loadData()
+    setSaving(true)
+    setError('')
+    try {
+      await createBudget({ ...form, limit_amount: Number(form.limit_amount) })
+      setModalOpen(false)
+      setForm({ category: 'food', limit_amount: '', month: getCurrentMonthFirstDay() })
+      loadData()
+    } catch (err) {
+      const data = err?.response?.data
+      let message = data?.detail || data?.error
+      if (!message && data && typeof data === 'object') {
+        const firstKey = Object.keys(data)[0]
+        if (firstKey) {
+          const val = data[firstKey]
+          message = Array.isArray(val) ? val[0] : String(val)
+        }
+      }
+      setError(message || 'Failed to save budget')
+    } finally {
+      setSaving(false)
+    }
   }
 
   const summary = [
@@ -252,7 +272,8 @@ export default function Budgets() {
                   id="budget-limit"
                   type="number"
                   step="0.01"
-                  min="1"
+                  min="0.01"
+                  max="99999999999999.99"
                   value={form.limit_amount}
                   onChange={(e) => setForm((prev) => ({ ...prev, limit_amount: e.target.value }))}
                   className="data w-full bg-transparent text-sm text-fg placeholder:text-fg-faint outline-none"
@@ -262,11 +283,13 @@ export default function Budgets() {
               </div>
             </FormField>
           </div>
+          <Alert message={error} type="error" />
           <button
             type="submit"
-            className="mt-2 w-full cursor-pointer rounded-full bg-accent px-4 py-2.5 text-sm font-semibold text-on-accent shadow-[var(--shadow-glow)] transition-transform duration-200 hover:scale-[1.02] active:scale-[0.98]"
+            disabled={saving}
+            className="mt-2 w-full cursor-pointer rounded-full bg-accent px-4 py-2.5 text-sm font-semibold text-on-accent shadow-[var(--shadow-glow)] transition-transform duration-200 hover:scale-[1.02] active:scale-[0.98] disabled:opacity-60"
           >
-            Save Budget
+            {saving ? 'Saving…' : 'Save Budget'}
           </button>
         </form>
       </Modal>

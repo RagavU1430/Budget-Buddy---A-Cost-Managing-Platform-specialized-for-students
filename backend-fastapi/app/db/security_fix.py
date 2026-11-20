@@ -64,6 +64,13 @@ async def apply_database_security_hardening(conn: AsyncConnection) -> dict[str, 
         "CREATE INDEX IF NOT EXISTS ix_email_change_history_user_changed ON public.email_change_history(user_id, changed_at)",
         "CREATE INDEX IF NOT EXISTS ix_refresh_token_jti ON public.refresh_tokens(jti)",
         "CREATE INDEX IF NOT EXISTS ix_refresh_token_user_expires ON public.refresh_tokens(user_id, expires_at)",
+        # Upgrade monetary amount precision across all tables to NUMERIC(16, 2)
+        "ALTER TABLE public.incomes ALTER COLUMN amount TYPE NUMERIC(16, 2)",
+        "ALTER TABLE public.expenses ALTER COLUMN amount TYPE NUMERIC(16, 2)",
+        "ALTER TABLE public.budgets ALTER COLUMN limit_amount TYPE NUMERIC(16, 2)",
+        "ALTER TABLE public.savings_goals ALTER COLUMN target_amount TYPE NUMERIC(16, 2)",
+        "ALTER TABLE public.savings_goals ALTER COLUMN current_amount TYPE NUMERIC(16, 2)",
+        "ALTER TABLE public.profiles ALTER COLUMN monthly_income TYPE NUMERIC(16, 2)",
     ]
     for stmt in ddl_statements:
         try:

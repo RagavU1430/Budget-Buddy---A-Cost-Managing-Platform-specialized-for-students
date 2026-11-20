@@ -58,7 +58,16 @@ export default function TransactionLogger({ open, onClose, onSuccess }) {
       setExpenseForm({ title: '', amount: '', category: 'food', payment_method: 'upi', date: today, notes: '' })
       setIncomeForm({ title: '', amount: '', source_type: 'pocket_money', date: today, notes: '' })
     } catch (err) {
-      setError(err?.response?.data?.detail || 'Failed to log transaction')
+      const data = err?.response?.data
+      let message = data?.detail || data?.error
+      if (!message && data && typeof data === 'object') {
+        const firstKey = Object.keys(data)[0]
+        if (firstKey) {
+          const val = data[firstKey]
+          message = Array.isArray(val) ? val[0] : String(val)
+        }
+      }
+      setError(message || 'Failed to log transaction')
     } finally {
       setLoading(false)
     }
@@ -120,7 +129,8 @@ export default function TransactionLogger({ open, onClose, onSuccess }) {
               onChange={isExpense ? handleExpenseChange : handleIncomeChange}
               type="number"
               step="0.01"
-              min="1"
+              min="0.01"
+              max="99999999999999.99"
               placeholder="0.00"
               className="data w-full bg-transparent text-2xl font-semibold text-fg placeholder:text-fg-faint outline-none"
               required

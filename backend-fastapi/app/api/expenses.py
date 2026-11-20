@@ -16,6 +16,7 @@ POST/PATCH behaviour notes:
 from __future__ import annotations
 
 from datetime import date
+from decimal import Decimal
 from typing import Any
 
 from fastapi import APIRouter, Request, Response
@@ -73,9 +74,11 @@ def _expense_values(
     else:
         errors.add("title", "This field is required.")
 
-    # amount — DecimalField(max_digits=12, decimal_places=2)
+    # amount — DecimalField(max_digits=16, decimal_places=2, min_value=0.01)
     if "amount" in body:
-        values["amount"] = errors.run(validate_decimal, body, "amount")
+        values["amount"] = errors.run(
+            validate_decimal, body, "amount", max_digits=16, decimal_places=2, min_value=Decimal("0.01")
+        )
     else:
         errors.add("amount", "This field is required.")
 
@@ -122,7 +125,9 @@ def _income_values(body: dict[str, Any], partial: bool) -> tuple[Errors, dict[st
         errors.add("title", "This field is required.")
 
     if "amount" in body:
-        values["amount"] = errors.run(validate_decimal, body, "amount")
+        values["amount"] = errors.run(
+            validate_decimal, body, "amount", max_digits=16, decimal_places=2, min_value=Decimal("0.01")
+        )
     else:
         errors.add("amount", "This field is required.")
 

@@ -121,7 +121,7 @@ class Profile(TimestampMixin, Base):
     phone: Mapped[str] = mapped_column(String(20), nullable=False, default="")
     avatar_url: Mapped[str] = mapped_column(String(200), nullable=False, default="")
     monthly_income: Mapped[Decimal] = mapped_column(
-        Numeric(12, 2), nullable=False, default=Decimal("0")
+        Numeric(16, 2), nullable=False, default=Decimal("0")
     )
     currency: Mapped[str] = mapped_column(String(3), nullable=False, default="INR")
     financial_preferences: Mapped[dict[str, Any]] = mapped_column(
@@ -148,7 +148,7 @@ class Expense(TimestampMixin, Base):
     )
     category: Mapped[str] = mapped_column(String(15), nullable=False, default="misc")
     title: Mapped[str] = mapped_column(String(120), nullable=False)
-    amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    amount: Mapped[Decimal] = mapped_column(Numeric(16, 2), nullable=False)
     date: Mapped[date] = mapped_column(Date, nullable=False)
     payment_method: Mapped[str] = mapped_column(String(12), nullable=False, default="cash")
     notes: Mapped[str] = mapped_column(Text, nullable=False, default="")
@@ -173,7 +173,7 @@ class Income(TimestampMixin, Base):
         String(20), nullable=False, default="pocket_money"
     )
     title: Mapped[str] = mapped_column(String(120), nullable=False)
-    amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    amount: Mapped[Decimal] = mapped_column(Numeric(16, 2), nullable=False)
     date: Mapped[date] = mapped_column(Date, nullable=False)
     notes: Mapped[str] = mapped_column(Text, nullable=False, default="")
 
@@ -196,7 +196,7 @@ class Budget(TimestampMixin, Base):
     month: Mapped[date] = mapped_column(Date, nullable=False, index=True)
     category: Mapped[str] = mapped_column(String(15), nullable=False, default="misc")
     limit_amount: Mapped[Decimal] = mapped_column(
-        Numeric(12, 2), nullable=False, default=Decimal("0")
+        Numeric(16, 2), nullable=False, default=Decimal("0")
     )
 
     user: Mapped["User"] = relationship(back_populates="budgets")
@@ -216,9 +216,9 @@ class SavingsGoal(TimestampMixin, Base):
     )
     title: Mapped[str] = mapped_column(String(120), nullable=False)
     description: Mapped[str] = mapped_column(Text, nullable=False, default="")
-    target_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    target_amount: Mapped[Decimal] = mapped_column(Numeric(16, 2), nullable=False)
     current_amount: Mapped[Decimal] = mapped_column(
-        Numeric(12, 2), nullable=False, default=Decimal("0")
+        Numeric(16, 2), nullable=False, default=Decimal("0")
     )
     target_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     priority: Mapped[str] = mapped_column(String(10), nullable=False, default="medium")
