@@ -69,17 +69,6 @@ class Settings(BaseSettings):
         elif url.startswith("postgresql://") and not url.startswith("postgresql+asyncpg://"):
             url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
 
-        # In serverless environments, ensure proper SSL handling
-        if (
-            (os.getenv("VERCEL") or os.getenv("AWS_LAMBDA_FUNCTION_NAME"))
-            and "postgresql" in url
-        ):
-            # Ensure SSL mode is set for serverless Postgres connections
-            if "?" not in url:
-                url += "?sslmode=require"
-            elif "sslmode=" not in url:
-                url += "&sslmode=require"
-
         return url
 
     @field_validator("LOCAL_STORAGE_DIR", mode="before")
