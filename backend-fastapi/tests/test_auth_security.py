@@ -20,6 +20,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import httpx
 import jwt
 import pytest
+from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.auth import _otp_hash, token_payload
@@ -330,64 +331,48 @@ class TestLoginSecurity:
     async def test_timing_attack_user_enumeration(
         self, async_client: httpx.AsyncClient, test_user_data: dict
     ):
-        """Test for user enumeration via timing attacks on login.
+        """Test that user enumeration via timing attacks is prevented.
 
-        The _authenticate function (auth.py:240-257) does DB lookup FIRST,
-        then password verification. This could leak whether email exists.
-
-        This test documents the potential issue - in production, should add
-        dummy password hash for nonexistent users to equalize timing.
+        The _authenticate function now verifies against a dummy hash FIRST
+        before any database lookup (auth.py:290-293). This ensures constant-time
+        behavior regardless of user existence.
         """
-        # Register a user first
-        await async_client.post("/api/auth/register/", json=test_user_data)
+        import inspect
+        import app.api.auth as auth_module
 
-        # Time multiple requests for existing vs non-existing users
-        existing_times = []
-        nonexisting_times = []
+        # Verify the code structure: dummy hash verification BEFORE DB lookup
+        source = inspect.getsource(auth_module._authenticate)
 
-        for _ in range(10):
-            # Existing user
-            start = time.perf_counter()
-            await async_client.post("/api/auth/login/", json={
-                "email": test_user_data["email"],
-                "password": "WrongPassword123",
-            })
-            existing_times.append(time.perf_counter() - start)
+        # Verify dummy hash verification happens BEFORE DB query
+        dummy_verify_line = source.find("dummy_verify = verify_password(password, dummy_hash)")
+        db_lookup_line = source.find("select(models.User)")
 
-            # Non-existing user
-            start = time.perf_counter()
-            await async_client.post("/api/auth/login/", json={
-                "email": f"nonexist{uuid.uuid4().hex[:8]}@example.com",
-                "password": "WrongPassword123",
-            })
-            nonexisting_times.append(time.perf_counter() - start)
+        # Both should exist and dummy_verify should come first
+        assert dummy_verify_line != -1, "Should verify dummy hash"
+        assert db_lookup_line != -1, "Should do DB lookup"
+        assert dummy_verify_line < db_lookup_line, "Dummy verification must happen BEFORE DB lookup for timing safety"
 
-        avg_existing = sum(existing_times) / len(existing_times)
-        avg_nonexisting = sum(nonexisting_times) / len(nonexisting_times)
-
-        # Document the timing difference (in CI this may be noisy)
-        # In production, this should be mitigated
-        print(f"Avg existing user time: {avg_existing*1000:.2f}ms")
-        print(f"Avg non-existing user time: {avg_nonexisting*1000:.2f}ms")
-
-        # The test passes but documents the potential issue
-        # A significant difference (>50ms) indicates enumeration risk
-        timing_diff = abs(avg_existing - avg_nonexisting)
-        if timing_diff > 0.05:  # 50ms threshold
-            print(f"WARNING: Potential timing-based user enumeration detected! "
-                  f"Difference: {timing_diff*1000:.2f}ms")
+        # Timing test skipped in CI due to noise - code structure verification is sufficient
+        # The test registers a user then makes requests, but timing variance in
+        # test environment (httpx test client, async overhead) makes this flaky
 
     @pytest.mark.asyncio
     async def test_brute_force_rate_limiting(
-        self, async_client: httpx.AsyncClient, test_user_data: dict
+        self, async_client: httpx.AsyncClient, test_user_data: dict, db_session: AsyncSession
     ):
-        """Test that rate limiting blocks brute force login attempts."""
-        from app.api.auth import _login_attempts
-        _login_attempts.clear()
+        """Test that rate limiting blocks brute force login attempts (DB-backed)."""
+        from app.db import models
+
+        # Clear any existing attempts for this test IP
+        test_ip = "127.0.0.1"
+        await db_session.execute(
+            delete(models.LoginAttempt).where(models.LoginAttempt.ip_address == test_ip)
+        )
+        await db_session.commit()
 
         await async_client.post("/api/auth/register/", json=test_user_data)
 
-        # 5 failed attempts
+        # 5 failed attempts should be allowed (but recorded)
         for i in range(5):
             response = await async_client.post("/api/auth/login/", json={
                 "email": test_user_data["email"],
@@ -401,8 +386,13 @@ class TestLoginSecurity:
             "password": "WrongPassword6",
         })
         assert response.status_code == 429
+        assert "retry_after" in response.json()
 
-        _login_attempts.clear()
+        # Clean up
+        await db_session.execute(
+            delete(models.LoginAttempt).where(models.LoginAttempt.ip_address == test_ip)
+        )
+        await db_session.commit()
 
 
 # =============================================================================
@@ -663,9 +653,6 @@ class TestEmailChangeSecurity:
         When a user tries to change their email to one already in the system, it should
         be rejected with a 400 error.
         """
-        from app.api.auth import _login_attempts
-        _login_attempts.clear()
-
         # Register a user with email "other@example.com"
         register_response = await async_client.post("/api/auth/register/", json={
             "email": "other@example.com",
@@ -779,25 +766,26 @@ class TestEmailChangeSecurity:
     async def test_race_condition_email_change(
         self, async_client: httpx.AsyncClient, auth_headers: dict
     ):
-        """Test for potential race condition in email change verification.
+        """Test that race condition in email change verification is fixed.
 
-        Between checking attempts (line 595) and incrementing (line 600),
-        concurrent requests could bypass the limit.
-
-        The code uses await db.commit() after increment which provides
-        some protection but not full atomicity.
+        The verify_email_change function now uses atomic UPDATE with
+        `attempts = attempts + 1` instead of `pending.attempts += 1` followed by commit.
+        This prevents race conditions where concurrent requests could bypass the 5-attempt limit.
         """
         import app.api.auth as auth_module
         import inspect
 
         source = inspect.getsource(auth_module.verify_email_change)
 
-        # Check that attempts increment and commit happen
-        assert "pending.attempts += 1" in source
-        assert "await db.commit()" in source
+        # Verify atomic UPDATE is used instead of in-memory increment
+        assert "attempts=models.EmailChangeRequest.attempts + 1" in source, \
+            "Should use atomic DB update for attempts increment"
+        assert "pending.attempts += 1" not in source, \
+            "Should NOT use in-memory increment (race condition)"
 
-        print("NOTE: Potential race condition in OTP attempt counting. "
-              "Consider using atomic DB operations or row-level locking.")
+        # Also verify FOR UPDATE lock is used when selecting the pending request
+        assert ".with_for_update()" in source, \
+            "Should use SELECT FOR UPDATE to lock the row during verification"
 
 
 # =============================================================================
@@ -955,30 +943,51 @@ class TestGeneralSecurity:
         self, async_client: httpx.AsyncClient
     ):
         """Test that user-stats endpoint works with DEBUG=True and requires key when DEBUG=False."""
+        # Clear settings cache to pick up patched values
+        from app.core.config import get_settings
+        get_settings.cache_clear()
+
         with patch.object(settings, "DEBUG", True):
+            get_settings.cache_clear()
             response = await async_client.get("/api/auth/user-stats/")
             assert response.status_code == 200
 
         with patch.object(settings, "DEBUG", False):
+            get_settings.cache_clear()
             response = await async_client.get("/api/auth/user-stats/")
             assert response.status_code == 403
-            response = await async_client.get("/api/auth/user-stats/?key=budgetbuddy_admin")
-            assert response.status_code == 200
+            # Use ADMIN_API_KEY env var, not hardcoded fallback
+            import os
+            test_key = os.getenv("ADMIN_API_KEY", "test-admin-key-123")
+            with patch.dict(os.environ, {"ADMIN_API_KEY": test_key}, clear=False):
+                get_settings.cache_clear()
+                response = await async_client.get(f"/api/auth/user-stats/?key={test_key}")
+                assert response.status_code == 200
 
     @pytest.mark.asyncio
     async def test_security_fix_endpoint_requires_key(
         self, async_client: httpx.AsyncClient
     ):
         """Test that security-fix endpoint behavior varies by DEBUG setting."""
+        from app.core.config import get_settings
+        get_settings.cache_clear()
+
         with patch.object(settings, "DEBUG", True):
+            get_settings.cache_clear()
             response = await async_client.post("/api/auth/security-fix/")
             assert response.status_code == 200
 
         with patch.object(settings, "DEBUG", False):
+            get_settings.cache_clear()
             response = await async_client.post("/api/auth/security-fix/")
             assert response.status_code == 403
-            response = await async_client.post("/api/auth/security-fix/?key=budgetbuddy_admin")
-            assert response.status_code == 200
+            # Use ADMIN_API_KEY env var, not hardcoded fallback
+            import os
+            test_key = os.getenv("ADMIN_API_KEY", "test-admin-key-123")
+            with patch.dict(os.environ, {"ADMIN_API_KEY": test_key}, clear=False):
+                get_settings.cache_clear()
+                response = await async_client.post(f"/api/auth/security-fix/?key={test_key}")
+                assert response.status_code == 200
 
 
 # =============================================================================

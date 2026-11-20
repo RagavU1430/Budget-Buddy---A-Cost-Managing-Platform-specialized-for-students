@@ -232,6 +232,19 @@ class SavingsGoal(TimestampMixin, Base):
         return self.is_completed
 
 
+class LoginAttempt(Base):
+    __tablename__ = "login_attempts"
+    __table_args__ = (
+        Index("ix_login_attempt_ip_created", "ip_address", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(BigPK, primary_key=True, autoincrement=True)
+    ip_address: Mapped[str] = mapped_column(String(45), nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utcnow, index=True
+    )
+
+
 class EmailChangeRequest(TimestampMixin, Base):
     __tablename__ = "email_change_requests"
     __table_args__ = (

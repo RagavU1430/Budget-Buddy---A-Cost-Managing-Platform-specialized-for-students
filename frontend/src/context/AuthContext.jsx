@@ -23,7 +23,7 @@ export function AuthProvider({ children }) {
     async ({ email, password }) => {
       const { data } = await api.post('/auth/login/', { email, password })
       if (data.access) localStorage.setItem(TOKEN_KEYS.access, data.access)
-      if (data.refresh) localStorage.setItem(TOKEN_KEYS.refresh, data.refresh)
+      // Refresh token is now stored in httpOnly cookie by backend
       setUser(data.user)
       return data.user
     },
@@ -34,7 +34,7 @@ export function AuthProvider({ children }) {
     async (payload) => {
       const { data } = await api.post('/auth/register/', payload)
       if (data.access) localStorage.setItem(TOKEN_KEYS.access, data.access)
-      if (data.refresh) localStorage.setItem(TOKEN_KEYS.refresh, data.refresh)
+      // Refresh token is now stored in httpOnly cookie by backend
       setUser(data.user)
       return data.user
     },
@@ -42,14 +42,13 @@ export function AuthProvider({ children }) {
   )
 
   const logout = useCallback(async () => {
-    // Call backend logout endpoint to clear httpOnly cookies
+    // Call backend logout endpoint to clear httpOnly cookies and blacklist JTI
     try {
       await api.post('/auth/logout/')
     } catch {
       // Ignore logout errors
     }
     localStorage.removeItem(TOKEN_KEYS.access)
-    localStorage.removeItem(TOKEN_KEYS.refresh)
     setUser(null)
     // Trigger a refresh to clear any cached state
     window.dispatchEvent(new Event('budgetbuddy:data-refresh'))

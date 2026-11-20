@@ -3,11 +3,48 @@
 from __future__ import annotations
 
 import os
+import re
 from functools import lru_cache
 from typing import Any
+from urllib.parse import urlparse, urlunparse, parse_qs, urlencode
 
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+DEFAULT_SECRET_KEY = "django-insecure-dev-only-change-me"
+
+
+def _normalize_database_url(url: str) -> str:
+    """Normalize database URL for asyncpg: strip SSL params, fix driver, validate."""
+    url = str(url).strip()
+
+    if not url:
+        raise ValueError(
+            "DATABASE_URL is required. Supabase PostgreSQL is mandatory. "
+            "Set DATABASE_URL=postgresql+asyncpg://postgres:password@host:5432/dbname"
+        )
+
+    # Parse URL to manipulate query parameters cleanly
+    parsed = urlparse(url)
+    query_params = parse_qs(parsed.query, keep_blank_values=True)
+
+    # Strip all SSL-related query parameters (asyncpg uses connect_args for SSL)
+    ssl_params = {"sslmode", "sslcert", "sslkey", "sslrootcert", "sslcrl", "ssl_min_protocol_version"}
+    filtered_params = {k: v for k, v in query_params.items() if k not in ssl_params}
+
+    # Reconstruct URL without SSL params
+    new_query = urlencode(filtered_params, doseq=True)
+    parsed = parsed._replace(query=new_query)
+    url = urlunparse(parsed)
+
+    # Normalize postgres driver to asyncpg for SQLAlchemy async engine
+    if url.startswith("postgres://"):
+        url = url.replace("postgres://", "postgresql+asyncpg://", 1)
+    elif url.startswith("postgresql://") and not url.startswith("postgresql+asyncpg://"):
+        url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
+
+    return url
 
 
 class Settings(BaseSettings):
@@ -21,7 +58,7 @@ class Settings(BaseSettings):
     # Core
     APP_NAME: str = "budgetbuddy-api"
     DEBUG: bool = False
-    SECRET_KEY: str = "django-insecure-dev-only-change-me"
+    SECRET_KEY: str = DEFAULT_SECRET_KEY
     JWT_ALGORITHM: str = "HS256"
     ADMIN_API_KEY: str = ""
 
@@ -32,6 +69,40 @@ class Settings(BaseSettings):
             clean = v.strip().lower()
             return clean in ("true", "1", "t", "yes", "y", "debug", "development")
         return bool(v)
+
+    @field_validator("SECRET_KEY")
+    @classmethod
+    def validate_secret_key(cls, v: str) -> str:
+        """Ensure production uses a strong secret key, not the default."""
+        if v == DEFAULT_SECRET_KEY:
+            # Check if we're in production (not DEBUG, not localhost DB)
+            is_production = (
+                not os.getenv("DEBUG", "").lower() in ("true", "1", "t", "yes", "y", "debug", "development")
+                and "localhost" not in os.getenv("DATABASE_URL", "")
+                and "127.0.0.1" not in os.getenv("DATABASE_URL", "")
+            )
+            if is_production:
+                raise ValueError(
+                    "SECRET_KEY must be changed from default in production. "
+                    "Generate with: python -c \"import secrets; print(secrets.token_urlsafe(64))\""
+                )
+        return v
+
+    @field_validator("DEBUG")
+    @classmethod
+    def validate_debug_production(cls, v: bool, info) -> bool:
+        """Warn/block DEBUG=True in production-like environments."""
+        # Allow DEBUG locally, but check if production env vars are set
+        if v:
+            db_url = os.getenv("DATABASE_URL", "")
+            if db_url and "localhost" not in db_url and "127.0.0.1" not in db_url:
+                import warnings
+                warnings.warn(
+                    "DEBUG=True with remote database — ensure this is intentional for production!",
+                    RuntimeWarning,
+                    stacklevel=2,
+                )
+        return v
 
     # Database (SQLAlchemy async URL) - Supabase PostgreSQL is mandatory
     DATABASE_URL: str = ""
@@ -48,28 +119,14 @@ class Settings(BaseSettings):
             or os.getenv("POSTGRES_PRISMA_URL")
             or ""
         )
-        url = str(raw).strip()
+        return _normalize_database_url(raw)
 
-        if not url:
-            raise ValueError(
-                "DATABASE_URL is required. Supabase PostgreSQL is mandatory. "
-                "Set DATABASE_URL=postgresql+asyncpg://postgres:password@host:5432/dbname"
-            )
-
-        # Strip sslmode query parameter so asyncpg handles SSL via connect_args cleanly
-        if "sslmode=" in url:
-            import re
-            url = re.sub(r"[?&]sslmode=[^&]+", "", url)
-            if "?" not in url and "&" in url:
-                url = url.replace("&", "?", 1)
-
-        # Normalize postgres driver to asyncpg for SQLAlchemy async engine
-        if url.startswith("postgres://"):
-            url = url.replace("postgres://", "postgresql+asyncpg://", 1)
-        elif url.startswith("postgresql://") and not url.startswith("postgresql+asyncpg://"):
-            url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
-
-        return url
+    @field_validator("DIRECT_DATABASE_URL", mode="before")
+    @classmethod
+    def parse_direct_database_url(cls, v: Any) -> str | None:
+        if v is None or v == "":
+            return None
+        return _normalize_database_url(v)
 
     @field_validator("LOCAL_STORAGE_DIR", mode="before")
     @classmethod
@@ -86,12 +143,13 @@ class Settings(BaseSettings):
     # DRF PAGE_SIZE parity.
     PAGE_SIZE: int = 20
 
-    # CORS
+    # CORS - Restricted to known domains only (no wildcard regex)
     CORS_ORIGINS: str = (
         "http://localhost:5173,http://127.0.0.1:5173,"
-        "https://budgetbuddy-student.vercel.app,https://frontend-iota-black-70.vercel.app"
+        "https://budgetbuddy-student.vercel.app,https://frontend-iota-black-70.vercel.app,"
+        "https://budgetbuddy-app-six.vercel.app"
     )
-    CORS_ORIGIN_REGEX: str = r"^https://.*\.vercel\.app$"
+    # CORS_ORIGIN_REGEX removed — use explicit CORS_ORIGINS list for security
 
     # Assistant
     GEMINI_API_KEY: str = ""

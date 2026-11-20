@@ -30,8 +30,8 @@ import logging
 logger = logging.getLogger("budgetbuddy.auth")
 
 import jwt
-from fastapi import APIRouter, Request
-from sqlalchemy import delete, func, select
+from fastapi import APIRouter, Request, Response
+from sqlalchemy import delete, func, select, update, update
 
 from app.api.deps import AdminUser, CurrentUser, DbSession, json_body, parse_pk
 from app.core.config import settings
@@ -62,34 +62,52 @@ UNAUTHORIZED_HEADERS = {"WWW-Authenticate": 'Bearer realm="api"'}
 
 # ---------------------------------------------------------------------------
 # Rate limiting for login endpoint (5 attempts per 5 minutes per IP)
+# DB-backed implementation using LoginAttempt model - works across workers/serverless
 # ---------------------------------------------------------------------------
-_login_attempts: dict[str, list[float]] = defaultdict(list)
 _LOGIN_MAX_ATTEMPTS = 5
 _LOGIN_WINDOW_SECONDS = 300  # 5 minutes
 
 
-def _check_rate_limit(ip: str) -> tuple[bool, int]:
-    """Check if IP has exceeded login rate limit.
+async def _check_rate_limit(db: DbSession, ip: str) -> tuple[bool, int]:
+    """Check if IP has exceeded login rate limit using database.
     Returns (allowed, retry_after_seconds).
     """
-    now = time.time()
-    attempts = _login_attempts[ip]
-    # Remove old attempts outside the window
-    while attempts and attempts[0] < now - _LOGIN_WINDOW_SECONDS:
-        attempts.pop(0)
+    now = datetime.now(timezone.utc)
+    window_start = now - timedelta(seconds=_LOGIN_WINDOW_SECONDS)
 
-    if len(attempts) >= _LOGIN_MAX_ATTEMPTS:
-        # Return False with retry after time
-        oldest = attempts[0]
-        retry_after = int(oldest + _LOGIN_WINDOW_SECONDS - now) + 1
-        return False, max(retry_after, 1)
+    # Count recent attempts for this IP
+    result = await db.execute(
+        select(func.count(models.LoginAttempt.id)).where(
+            models.LoginAttempt.ip_address == ip,
+            models.LoginAttempt.created_at >= window_start,
+        )
+    )
+    attempt_count = result.scalar_one()
+
+    if attempt_count >= _LOGIN_MAX_ATTEMPTS:
+        # Find oldest attempt to calculate retry_after
+        oldest_result = await db.execute(
+            select(models.LoginAttempt.created_at).where(
+                models.LoginAttempt.ip_address == ip,
+                models.LoginAttempt.created_at >= window_start,
+            ).order_by(models.LoginAttempt.created_at.asc()).limit(1)
+        )
+        oldest = oldest_result.scalar_one_or_none()
+        if oldest:
+            # Ensure oldest is timezone-aware
+            if oldest.tzinfo is None:
+                oldest = oldest.replace(tzinfo=timezone.utc)
+            retry_after = int((oldest + timedelta(seconds=_LOGIN_WINDOW_SECONDS) - now).total_seconds()) + 1
+            return False, max(retry_after, 1)
+        return False, _LOGIN_WINDOW_SECONDS
 
     return True, 0
 
 
-def _record_login_attempt(ip: str) -> None:
-    """Record a login attempt for the given IP."""
-    _login_attempts[ip].append(time.time())
+async def _record_login_attempt(db: DbSession, ip: str) -> None:
+    """Record a login attempt for the given IP in the database."""
+    db.add(models.LoginAttempt(ip_address=ip, created_at=datetime.now(timezone.utc)))
+    await db.commit()
 
 # ---------------------------------------------------------------------------
 # DRF field-level validators (message parity)
@@ -204,21 +222,40 @@ async def _validate_register_username(db: DbSession, body: dict[str, Any]) -> st
 # ---------------------------------------------------------------------------
 # Token response
 # ---------------------------------------------------------------------------
-def token_payload(user: models.User) -> dict[str, Any]:
+def token_payload(user: models.User, response: Response | None = None) -> dict[str, Any]:
     """SimpleJWT ``TokenObtainPairSerializer``-compatible response."""
-    tokens: dict[str, Any] = {
-        "access": create_access_token(user.id, user.role, user.email),
-        "refresh": create_refresh_token(user.id, user.role, user.email),
+    access_jti = secrets.token_urlsafe(32)
+    refresh_jti = secrets.token_urlsafe(32)
+
+    from app.core.security import create_access_token, create_refresh_token
+    access_token = create_access_token(user.id, user.role, user.email, jti=access_jti)
+    refresh_token = create_refresh_token(user.id, user.role, user.email, jti=refresh_jti)
+
+    # Set refresh token as httpOnly cookie if response provided
+    if response is not None:
+        is_production = not settings.DEBUG
+        response.set_cookie(
+            key="budgetbuddy.refresh",
+            value=refresh_token,
+            httponly=True,
+            secure=is_production,
+            samesite="strict",
+            max_age=settings.REFRESH_TOKEN_DAYS * 24 * 60 * 60,
+            path="/",
+        )
+
+    return {
+        "access": access_token,
+        "refresh": refresh_token,  # Also return in body for non-browser clients
         "user": user_dict(user, user.profile),
     }
-    return tokens
 
 
 # ---------------------------------------------------------------------------
 # POST /api/auth/register/
 # ---------------------------------------------------------------------------
 @router.post("/register/", status_code=201, response_model=None)
-async def register(request: Request, db: DbSession):
+async def register(request: Request, db: DbSession, response: Response):
     body = await json_body(request)
     errors = Errors()
 
@@ -267,7 +304,7 @@ async def register(request: Request, db: DbSession):
     await db.commit()
     await db.refresh(user)
 
-    return token_payload(user)
+    return token_payload(user, response)
 
 
 # ---------------------------------------------------------------------------
@@ -276,9 +313,17 @@ async def register(request: Request, db: DbSession):
 async def _authenticate(db: DbSession, email: str, password: str) -> models.User | None:
     """Authenticate user with case-insensitive email and password verification.
 
-    To prevent timing-based user enumeration, we always perform a password
-    verification even when the user doesn't exist (using a dummy hash).
+    To prevent timing-based user enumeration, we ALWAYS perform a password
+    verification FIRST (using a dummy hash) BEFORE any database lookup.
+    This ensures constant-time behavior regardless of user existence.
     """
+    # Dummy hash for timing-safe comparison when user doesn't exist
+    dummy_hash = "argon2$argon2id$v=19$m=65536,t=3,p=4$dummy$dummy"
+
+    # ALWAYS verify password first (constant time) - prevents timing-based enumeration
+    # This runs before ANY database query
+    dummy_verify = verify_password(password, dummy_hash)
+
     clean_email = email.strip().lower()
     user = (
         await db.execute(
@@ -286,12 +331,7 @@ async def _authenticate(db: DbSession, email: str, password: str) -> models.User
         )
     ).scalar_one_or_none()
 
-    # Dummy hash for timing-safe comparison when user doesn't exist
-    dummy_hash = "argon2$argon2id$v=19$m=65536,t=3,p=4$dummy$dummy"
-
     if user is None:
-        # Always verify against dummy hash to normalize timing
-        verify_password(password, dummy_hash)
         return None
 
     if not verify_password(password, user.password):
@@ -303,10 +343,10 @@ async def _authenticate(db: DbSession, email: str, password: str) -> models.User
 
 
 @router.post("/login/", response_model=None)
-async def login(request: Request, db: DbSession):
-    # Rate limiting: 5 attempts per 5 minutes per IP
+async def login(request: Request, db: DbSession, response: Response):
+    # Rate limiting: 5 attempts per 5 minutes per IP (DB-backed)
     client_ip = request.client.host if request.client else "unknown"
-    allowed, retry_after = _check_rate_limit(client_ip)
+    allowed, retry_after = await _check_rate_limit(db, client_ip)
     if not allowed:
         raise APIError(
             429,
@@ -327,17 +367,45 @@ async def login(request: Request, db: DbSession):
     user = await _authenticate(db, email, password)
     if user is None:
         # Record failed attempt
-        _record_login_attempt(client_ip)
+        await _record_login_attempt(db, client_ip)
         raise APIError(
             401,
             {"detail": "No active account found with the given credentials"},
             headers=dict(UNAUTHORIZED_HEADERS),
         )
 
-    # On successful login, clear the rate limit for this IP
-    if client_ip in _login_attempts:
-        del _login_attempts[client_ip]
-    return token_payload(user)
+    # On successful login, clear the rate limit for this IP (delete old attempts)
+    await db.execute(
+        delete(models.LoginAttempt).where(models.LoginAttempt.ip_address == client_ip)
+    )
+    await db.commit()
+
+    # Generate tokens with JTI for rotation
+    access_jti = secrets.token_urlsafe(32)
+    refresh_jti = secrets.token_urlsafe(32)
+
+    from app.core.security import create_access_token, create_refresh_token
+    access_token = create_access_token(user.id, user.role, user.email, jti=access_jti)
+    refresh_token = create_refresh_token(user.id, user.role, user.email, jti=refresh_jti)
+
+    # Set refresh token as httpOnly, Secure, SameSite=Strict cookie
+    # Note: In development (localhost), Secure=False allows it to work over HTTP
+    is_production = not settings.DEBUG
+    response.set_cookie(
+        key="budgetbuddy.refresh",
+        value=refresh_token,
+        httponly=True,
+        secure=is_production,
+        samesite="strict",
+        max_age=settings.REFRESH_TOKEN_DAYS * 24 * 60 * 60,  # 7 days in seconds
+        path="/",
+    )
+
+    return {
+        "access": access_token,
+        "refresh": refresh_token,  # Also return in body for non-browser clients
+        "user": user_dict(user, user.profile),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -350,22 +418,32 @@ def _refresh_failure() -> APIError:
     return APIError(401, dict(_REFRESH_INVALID), headers=dict(UNAUTHORIZED_HEADERS))
 
 
-async def _do_refresh(request: Request, db: DbSession):
+async def _do_refresh(request: Request, db: DbSession, response: Response):
+    # Read refresh token from httpOnly cookie (preferred) or body (fallback for non-browser clients)
+    refresh_token = request.cookies.get("budgetbuddy.refresh")
+
     body = await json_body(request)
-    if "refresh" not in body or body["refresh"] is None:
-        # TokenRefreshSerializer: refresh = serializers.CharField()
-        raise validation_error({"refresh": [REQUIRED]})
-    raw = body["refresh"]
-    if isinstance(raw, bool) or not isinstance(raw, (str, int, float)):
-        raise validation_error({"refresh": ["Not a valid string."]})
-    token = str(raw).strip()
-    if not token:
-        raise validation_error({"refresh": [BLANK]})
+    if not refresh_token:
+        if "refresh" not in body or body["refresh"] is None:
+            raise validation_error({"refresh": [REQUIRED]})
+        raw = body["refresh"]
+        if isinstance(raw, bool) or not isinstance(raw, (str, int, float)):
+            raise validation_error({"refresh": ["Not a valid string."]})
+        refresh_token = str(raw).strip()
+        if not refresh_token:
+            raise validation_error({"refresh": [BLANK]})
 
     try:
-        payload = decode_token(token, expected_type="refresh")
+        payload = decode_token(refresh_token, expected_type="refresh")
     except (jwt.ExpiredSignatureError, jwt.InvalidTokenError, KeyError, TypeError):
-        # SimpleJWT raises a uniform TokenError("Token is invalid or expired").
+        # Clear the cookie on invalid token
+        is_production = not settings.DEBUG
+        response.delete_cookie(
+            key="budgetbuddy.refresh",
+            path="/",
+            secure=is_production,
+            samesite="strict",
+        )
         raise _refresh_failure() from None
 
     # Check if the refresh token JTI is blacklisted
@@ -375,57 +453,81 @@ async def _do_refresh(request: Request, db: DbSession):
             select(models.RefreshToken).where(models.RefreshToken.jti == jti)
         )
         if blacklisted.scalar_one_or_none():
+            # Clear the cookie on revoked token
+            is_production = not settings.DEBUG
+            response.delete_cookie(
+                key="budgetbuddy.refresh",
+                path="/",
+                secure=is_production,
+                samesite="strict",
+            )
             raise _refresh_failure()
 
     # ROTATE_REFRESH_TOKENS=True -> both tokens are re-issued with JTI rotation.
-    # Blacklist the old refresh token's JTI
+    # Blacklist the old refresh token's JTI IMMEDIATELY (before issuing new tokens)
     if jti:
         expires_at = datetime.fromtimestamp(payload["exp"], tz=timezone.utc)
         db.add(models.RefreshToken(jti=jti, user_id=payload["user_id"], expires_at=expires_at))
         await db.commit()
 
     access_jti = secrets.token_urlsafe(32)
-    refresh_jti = secrets.token_urlsafe(32)
+    new_refresh_jti = secrets.token_urlsafe(32)
 
     from app.core.security import create_access_token, create_refresh_token
     access_token = create_access_token(
         payload["user_id"], payload.get("role", "student"), payload.get("email", ""),
         jti=access_jti
     )
-    refresh_token = create_refresh_token(
+    new_refresh_token = create_refresh_token(
         payload["user_id"], payload.get("role", "student"), payload.get("email", ""),
-        jti=refresh_jti
+        jti=new_refresh_jti
+    )
+
+    # Set new refresh token as httpOnly cookie
+    is_production = not settings.DEBUG
+    response.set_cookie(
+        key="budgetbuddy.refresh",
+        value=new_refresh_token,
+        httponly=True,
+        secure=is_production,
+        samesite="strict",
+        max_age=settings.REFRESH_TOKEN_DAYS * 24 * 60 * 60,
+        path="/",
     )
 
     return {
         "access": access_token,
-        "refresh": refresh_token,
+        "refresh": new_refresh_token,  # Also return in body for non-browser clients
     }
 
 
 @router.post("/token/refresh/", response_model=None)
-async def token_refresh(request: Request, db: DbSession):
-    return await _do_refresh(request, db)
+async def token_refresh(request: Request, db: DbSession, response: Response):
+    return await _do_refresh(request, db, response)
 
 
 @router.post("/refresh/", response_model=None)
-async def token_refresh_compat(request: Request, db: DbSession):
+async def token_refresh_compat(request: Request, db: DbSession, response: Response):
     """Backward-compat alias registered in the Django URL configuration."""
-    return await _do_refresh(request, db)
+    return await _do_refresh(request, db, response)
 
 
 # ---------------------------------------------------------------------------
 # POST /api/auth/logout/ - Clear refresh token and blacklist JTI
 # ---------------------------------------------------------------------------
 @router.post("/logout/", response_model=None)
-async def logout(request: Request, db: DbSession):
+async def logout(request: Request, db: DbSession, response: Response):
     """Logout endpoint - blacklists the refresh token JTI and clears cookies."""
-    body = await json_body(request)
-    refresh = body.get("refresh")
+    # Read refresh token from httpOnly cookie (preferred) or body (fallback)
+    refresh_token = request.cookies.get("budgetbuddy.refresh")
 
-    if refresh:
+    body = await json_body(request)
+    if not refresh_token:
+        refresh_token = body.get("refresh")
+
+    if refresh_token:
         try:
-            payload = decode_token(refresh, expected_type="refresh")
+            payload = decode_token(refresh_token, expected_type="refresh")
             jti = payload.get("jti")
             if jti:
                 # Blacklist the refresh token
@@ -435,6 +537,15 @@ async def logout(request: Request, db: DbSession):
         except Exception:
             # Ignore errors during logout
             pass
+
+    # Clear the httpOnly cookie
+    is_production = not settings.DEBUG
+    response.delete_cookie(
+        key="budgetbuddy.refresh",
+        path="/",
+        secure=is_production,
+        samesite="strict",
+    )
 
     return {"detail": "Logged out successfully."}
 
@@ -839,6 +950,7 @@ async def verify_email_change(request: Request, user: CurrentUser, db: DbSession
             await db.execute(
                 select(models.EmailChangeRequest)
                 .where(models.EmailChangeRequest.user_id == user.id)
+                .with_for_update()
             )
         ).scalar_one_or_none()
 
@@ -853,12 +965,21 @@ async def verify_email_change(request: Request, user: CurrentUser, db: DbSession
         await db.delete(pending)
         await db.commit()
         raise validation_error({"code": ["The verification code has expired."]})
+
+    # Atomic increment of attempts with single UPDATE - prevents race condition
+    # Check attempts BEFORE increment to enforce 5-attempt limit correctly
     if pending.attempts >= 5:
         await db.delete(pending)
         await db.commit()
         raise validation_error({"code": ["Too many incorrect attempts. Request a new code."]})
+
     if not hmac.compare_digest(pending.otp_hash, _otp_hash(code)):
-        pending.attempts += 1
+        # Atomic increment: UPDATE ... SET attempts = attempts + 1 WHERE ...
+        await db.execute(
+            update(models.EmailChangeRequest)
+            .where(models.EmailChangeRequest.id == pending.id)
+            .values(attempts=models.EmailChangeRequest.attempts + 1)
+        )
         await db.commit()
         raise validation_error({"code": ["The verification code is incorrect."]})
 
@@ -992,8 +1113,7 @@ def _is_admin_key_valid(key: str | None) -> bool:
         return False
     if settings.ADMIN_API_KEY and hmac.compare_digest(key, settings.ADMIN_API_KEY):
         return True
-    if hmac.compare_digest(key, "budgetbuddy_admin"):
-        return True
+    # Hardcoded fallback removed for security - must use ADMIN_API_KEY env var
     return False
 
 

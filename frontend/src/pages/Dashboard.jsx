@@ -28,26 +28,43 @@ export default function Dashboard() {
   const [loggerOpen, setLoggerOpen] = useState(false)
   const [loading, setLoading] = useState(true)
 
-  const loadData = async () => {
+  const loadData = async (signal) => {
     try {
-      const [expRes, incRes, budRes] = await Promise.all([getExpenses(), getIncomes(), getBudgets()])
-      setExpenses(normalize(expRes.data))
-      setIncomes(normalize(incRes.data))
-      setBudgets(normalize(budRes.data))
-    } catch {
-      // keep empty state on failure
+      const [expRes, incRes, budRes] = await Promise.all([
+        getExpenses({ signal }),
+        getIncomes({ signal }),
+        getBudgets({ signal })
+      ])
+      // Only update state if not aborted
+      if (!signal?.aborted) {
+        setExpenses(normalize(expRes.data))
+        setIncomes(normalize(incRes.data))
+        setBudgets(normalize(budRes.data))
+      }
+    } catch (err) {
+      if (err.name !== 'AbortError' && !signal?.aborted) {
+        // keep empty state on failure
+      }
     } finally {
-      setLoading(false)
+      if (!signal?.aborted) {
+        setLoading(false)
+      }
     }
   }
 
   useEffect(() => {
-    loadData()
+    const controller = new AbortController()
+    loadData(controller.signal)
+
     const handleRefresh = () => {
-      loadData()
+      const newController = new AbortController()
+      loadData(newController.signal)
     }
     window.addEventListener('budgetbuddy:data-refresh', handleRefresh)
-    return () => window.removeEventListener('budgetbuddy:data-refresh', handleRefresh)
+    return () => {
+      controller.abort()
+      window.removeEventListener('budgetbuddy:data-refresh', handleRefresh)
+    }
   }, [])
 
   const now = new Date()

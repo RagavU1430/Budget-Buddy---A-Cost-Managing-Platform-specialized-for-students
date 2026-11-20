@@ -12,6 +12,7 @@ Two Supabase connection modes matter here:
 
 from __future__ import annotations
 
+import os
 from collections.abc import AsyncIterator
 from typing import Any
 from urllib.parse import urlsplit
@@ -38,15 +39,19 @@ def _connect_args(url: str) -> dict[str, Any]:
         port = parsed.port
         if port == TRANSACTION_POOLER_PORT:
             args["statement_cache_size"] = 0
-        if parsed.hostname and parsed.hostname not in ("localhost", "127.0.0.1"):
-            args["ssl"] = "require"
+        # Determine if SSL is required:
+        # - Always require SSL for remote hosts (non-localhost)
+        # - Also require SSL in serverless environments (Vercel, Lambda) even for localhost tunnels
+        is_serverless = bool(os.getenv("VERCEL") or os.getenv("AWS_LAMBDA_FUNCTION_NAME"))
+        hostname = parsed.hostname
+        if hostname and (hostname not in ("localhost", "127.0.0.1") or is_serverless):
+            args["ssl"] = True  # asyncpg expects True/False/SSLContext, not string "require"
     except Exception:
         pass
     return args
 
 
 def _build_engine(url: str) -> AsyncEngine:
-    import os
     is_serverless = bool(os.getenv("VERCEL") or os.getenv("AWS_LAMBDA_FUNCTION_NAME"))
     return create_async_engine(
         url,

@@ -45,6 +45,22 @@ async def lifespan(app: FastAPI):
         except Exception:
             pass
 
+    # Validate production settings
+    if not settings.DEBUG:
+        db_url = os.getenv("DATABASE_URL", "")
+        is_localhost = "localhost" in db_url or "127.0.0.1" in db_url
+        if not is_localhost:
+            # Verify SECRET_KEY is not default
+            from app.core.config import DEFAULT_SECRET_KEY
+            if settings.SECRET_KEY == DEFAULT_SECRET_KEY:
+                import warnings
+                warnings.warn(
+                    "PRODUCTION WARNING: SECRET_KEY is using default value! "
+                    "Generate a strong key with: python -c \"import secrets; print(secrets.token_urlsafe(64))\"",
+                    RuntimeWarning,
+                    stacklevel=2,
+                )
+
     yield
 
     await engine.dispose()
@@ -59,11 +75,41 @@ app = FastAPI(
     redoc_url="/redoc" if settings.DEBUG else None,
 )
 
-# CORS Configuration
+
+# Security headers middleware
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    response = await call_next(request)
+    # Content Security Policy
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline' 'unsafe-eval'; "
+        "style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data: https:; "
+        "font-src 'self' data:; "
+        "connect-src 'self' https:; "
+        "frame-ancestors 'none'; "
+        "base-uri 'self'; "
+        "form-action 'self'"
+    )
+    # HSTS (only in production with HTTPS)
+    if not settings.DEBUG:
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains; preload"
+    # Prevent clickjacking
+    response.headers["X-Frame-Options"] = "DENY"
+    # Prevent MIME sniffing
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    # Referrer policy
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    # Permissions policy
+    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    return response
+
+# CORS Configuration - removed wildcard regex for security
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
-    allow_origin_regex=settings.CORS_ORIGIN_REGEX if settings.CORS_ORIGIN_REGEX else None,
+    allow_origin_regex=None,  # Disabled - use explicit origins only
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -137,9 +183,16 @@ async def dbapi_error_handler(request: Request, exc: DBAPIError):
 async def unhandled_exception_handler(request: Request, exc: Exception):
     import traceback
     traceback.print_exc()
+    # Don't leak stack traces in production
+    if settings.DEBUG:
+        return JSONResponse(
+            status_code=500,
+            content={"detail": "An internal server error occurred.", "error": str(exc), "traceback": traceback.format_exc()},
+            headers=_cors_headers(request),
+        )
     return JSONResponse(
         status_code=500,
-        content={"detail": "An internal server error occurred.", "error": str(exc)},
+        content={"detail": "An internal server error occurred."},
         headers=_cors_headers(request),
     )
 

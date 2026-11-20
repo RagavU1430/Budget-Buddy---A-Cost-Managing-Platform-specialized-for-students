@@ -4,16 +4,21 @@ const API_BASE_URL = typeof import.meta.env.VITE_API_URL === 'string' && import.
   ? import.meta.env.VITE_API_URL
   : (import.meta.env.PROD ? 'https://budgetbuddy-app-six.vercel.app/api' : 'http://127.0.0.1:8000/api')
 
+// Only access token in localStorage (short-lived, 60 min)
+// Refresh token is stored in httpOnly cookie by backend
 export const TOKEN_KEYS = {
   access: 'budgetbuddy.access',
-  refresh: 'budgetbuddy.refresh',
+  // refresh: 'budgetbuddy.refresh', // DEPRECATED - now httpOnly cookie
 }
 
 const api = axios.create({
   baseURL: API_BASE_URL,
-  withCredentials: true,
+  withCredentials: true, // Required for httpOnly cookies
   headers: { 'Content-Type': 'application/json' },
 })
+
+// Promise to prevent multiple simultaneous refresh attempts
+let refreshPromise = null
 
 api.interceptors.request.use((config) => {
   // Prevent double /api/ prefix if already present in baseURL
@@ -36,23 +41,35 @@ api.interceptors.response.use(
   (response) => response,
   async (error) => {
     const original = error.config
-    const refresh = localStorage.getItem(TOKEN_KEYS.refresh)
 
-    if (error.response?.status === 401 && original && !original._retried && refresh) {
+    if (error.response?.status === 401 && original && !original._retried) {
       original._retried = true
+
+      // Use shared promise to prevent multiple simultaneous refresh attempts
+      if (!refreshPromise) {
+        refreshPromise = (async () => {
+          try {
+            // Backend reads refresh token from httpOnly cookie automatically
+            const { data } = await api.post('/auth/refresh/', {}, { withCredentials: true })
+            if (data.access) {
+              localStorage.setItem(TOKEN_KEYS.access, data.access)
+              original.headers.Authorization = `Bearer ${data.access}`
+            }
+            // New refresh token is set via httpOnly cookie by backend
+            return data
+          } catch (refreshErr) {
+            localStorage.removeItem(TOKEN_KEYS.access)
+            throw refreshErr
+          } finally {
+            refreshPromise = null
+          }
+        })()
+      }
+
       try {
-        const { data } = await api.post('/auth/refresh/', { refresh }, { withCredentials: true })
-        if (data.access) {
-          localStorage.setItem(TOKEN_KEYS.access, data.access)
-          original.headers.Authorization = `Bearer ${data.access}`
-        }
-        if (data.refresh) {
-          localStorage.setItem(TOKEN_KEYS.refresh, data.refresh)
-        }
+        await refreshPromise
         return api(original)
       } catch (refreshErr) {
-        localStorage.removeItem(TOKEN_KEYS.access)
-        localStorage.removeItem(TOKEN_KEYS.refresh)
         throw refreshErr
       }
     }

@@ -62,10 +62,7 @@ export default function Analytics() {
         <input
           type="month"
           value={month}
-          readOnly
-          aria-readonly="true"
           onChange={(e) => setMonth(e.target.value)}
-          onKeyDown={(e) => e.preventDefault()}
           className="rounded-full border border-line bg-white/5 px-4 py-2 text-sm text-fg"
         />
       </header>
