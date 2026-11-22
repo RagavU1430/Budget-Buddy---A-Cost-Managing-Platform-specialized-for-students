@@ -100,21 +100,23 @@ budgetbuddy/
 
 ## 🚀 Deployment
 
-### Option 1: Render (Recommended - Full-Stack)
+### Option 1: Railway (Recommended - Backend API)
 
-Deploy both frontend and backend with a single `render.yaml` configuration:
+Deploy the backend to Railway with `backend-fastapi/railway.json` and `backend-fastapi/Procfile`:
 
 ```bash
-# 1. Connect GitHub repo to Render
-# 2. Add environment secrets:
+# 1. Connect GitHub repo to Railway
+# 2. Set Root Directory to backend-fastapi
+# 3. Add environment secrets:
+#    - DATABASE_URL (Supabase connection string)
 #    - SECRET_KEY (64-character random string)
 #    - GEMINI_API_KEY (Google Gemini API key)
-# 3. Click "Manual Deploy"
+# 4. Generate public domain in Railway Networking settings
 ```
 
-See `render.yaml` for complete configuration.
+See `backend-fastapi/railway.json` and `VERCEL_DEPLOYMENT.md` for complete configuration.
 
-### Option 2: Vercel + Render (Frontend on Vercel, Backend on Render)
+### Option 2: Vercel + Railway (Frontend on Vercel, Backend on Railway)
 
 **Frontend (Vercel):**
 ```bash
@@ -123,15 +125,14 @@ vercel --prod
 ```
 
 Configure environment variables in Vercel dashboard:
-- `VITE_API_URL` - Point to your Render backend (e.g., https://budgetbuddy.onrender.com)
+- `VITE_API_URL` - Point to your Railway backend (e.g., https://budgetbuddy-backend.up.railway.app/api)
 
-**Backend (Render):**
+**Backend (Railway):**
 ```bash
-# In Render dashboard:
-# 1. Create new Web Service
+# In Railway dashboard:
+# 1. Create new Web Service from GitHub repo
 # 2. Set Root Directory: backend-fastapi
-# 3. Build Command: pip install -r requirements.txt
-# 4. Start Command: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+# 3. Start Command: uvicorn app.main:app --host 0.0.0.0 --port $PORT
 ```
 
 ### Option 3: Vercel Serverless (Experimental - Not Recommended for Production)

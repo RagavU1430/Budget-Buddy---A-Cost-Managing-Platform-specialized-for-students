@@ -1,15 +1,15 @@
-# BudgetBuddy Vercel Deployment Guide
+# BudgetBuddy Vercel & Railway Deployment Guide
 
 ## 🎯 Deployment Workflow
 
 **Architecture:**
 ```
-Vercel (Frontend) ↔ FastAPI Backend (on Render) ↔ Supabase (PostgreSQL)
+Vercel (Frontend) ↔ FastAPI Backend (on Railway) ↔ Supabase (PostgreSQL)
 ```
 
 This is a **hybrid deployment** where:
-- **Vercel**: Serves the React frontend (budgetbuddy.vercel.app)
-- **Render**: Hosts the FastAPI backend API
+- **Vercel**: Serves the React frontend (`budgetbuddy-app.vercel.app` / `budgetbuddy-app-six.vercel.app`)
+- **Railway**: Hosts the FastAPI backend API (`https://<railway-domain>.up.railway.app`)
 - **Supabase**: Provides the PostgreSQL database
 
 ---
@@ -34,7 +34,7 @@ cd frontend
 vercel link
 ```
 
-4. **Set project name:** `budgetbuddy`
+4. **Set project name:** `budgetbuddy-app`
 
 ### Step 2: Set Environment Variables in Vercel
 
@@ -42,7 +42,7 @@ vercel link
 
 | Variable | Value | Environment |
 |----------|-------|-------------|
-| `VITE_API_URL` | `https://budgetbuddy-backend.onrender.com/api` | Production |
+| `VITE_API_URL` | `https://<railway-domain>.up.railway.app/api` | Production |
 | `VITE_APP_NAME` | `Budget Buddy` | Production |
 | `VITE_APP_VERSION` | `2.0.0` | Production |
 
@@ -53,71 +53,79 @@ cd frontend
 vercel --prod
 ```
 
-**Expected URL:** `https://budgetbuddy.vercel.app`
+**Expected URL:** `https://budgetbuddy-app.vercel.app` (or `https://budgetbuddy-app-six.vercel.app`)
 
-### Step 4: Deploy FastAPI Backend to Render
+### Step 4: Deploy FastAPI Backend to Railway
 
-1. **Go to render.com** and create a new Web Service
+1. **Go to railway.app** and create a new Project (or use Railway MCP / CLI)
 2. **Service Configuration:**
-   - Name: `budgetbuddy-backend`
-   - Root Directory: `backend-fastapi/`
-   - Build Command: `pip install -r requirements.txt`
-   - Start Command: `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
+   - Source: Connect GitHub Repository
+   - Root Directory: `backend-fastapi`
+   - Build Provider: Nixpacks (auto-detected via `railway.json`)
+   - Start Command: `uvicorn app.main:app --host 0.0.0.0 --port $PORT` (auto-detected via `railway.json` and `Procfile`)
+   - Healthcheck Path: `/api/health/`
 
-3. **Environment Variables in Render:**
-   - `DATABASE_URL`: Your Supabase connection string
+3. **Environment Variables in Railway:**
+   - `DATABASE_URL`: Your Supabase connection string (`postgresql+asyncpg://postgres:password@...:5432/postgres`)
    - `SECRET_KEY`: Generate with `python -c "import secrets; print(secrets.token_urlsafe(64))"`
-   - `CORS_ORIGINS`: `https://budgetbuddy-app.vercel.app,https://budgetbuddy-app-six.vercel.app,https://budgetbuddy.vercel.app,https://budgetbuddy-student.vercel.app,https://frontend-iota-black-70.vercel.app,http://localhost:5173`
+   - `CORS_ORIGINS`: `https://budgetbuddy-app.vercel.app,https://budgetbuddy-app-six.vercel.app,https://budgetbuddy.vercel.app,https://budgetbuddy-student.vercel.app,https://frontend-iota-black-70.vercel.app,http://localhost:5173,https://*.up.railway.app`
    - `DEBUG`: `false`
    - `STORAGE_BACKEND`: `supabase`
+   - `SMTP_HOST`: e.g. `smtp.gmail.com`
+   - `SMTP_PORT`: `587`
+   - `SMTP_USERNAME`: your SMTP email
+   - `SMTP_PASSWORD`: your SMTP app password
+   - `SMTP_FROM_EMAIL`: your SMTP sender email
+   - `SMTP_USE_TLS`: `true`
 
-4. **Add PostgreSQL Database:**
-   - Create a new PostgreSQL database on Render
-   - Copy the connection string to `DATABASE_URL`
+4. **Generate Public Domain in Railway:**
+   - In Service Settings → Networking → Public Networking: click "Generate Domain"
+   - You will get a domain like `https://budgetbuddy-backend-production.up.railway.app`
 
 ### Step 5: Supabase Database Setup
 
 **In Supabase Dashboard:**
 
 1. **Database:**
-   - Use the connection string from Render's PostgreSQL
-   - Or create a new project at supabase.com
-
+   - Connect using the transaction or session pooler string from Supabase Project Settings
 2. **Storage (Optional):**
-   - Enable Storage bucket for report files
-   - Configure API keys for file uploads
+   - Enable Storage bucket `reports` for file uploads
 
 ---
 
 ## 🔧 Configuration Files
 
 ### `.vercel.json` (Root directory)
+Configures static SPA routing for the React frontend on Vercel:
 ```json
 {
   "version": 2,
-  "builds": [
-    {
-      "src": "frontend/package.json",
-      "use": "@vercel/static-build",
-      "config": {
-        "distDirectory": "dist"
-      }
-    }
-  ],
-  "routes": [
-    {
-      "src": "/(.*)",
-      "dest": "/index.html"
-    }
+  "rewrites": [
+    { "source": "/(.*)", "destination": "/index.html" }
   ]
 }
 ```
 
-### `render.yaml` (Root directory)
-Already configured with:
-- Backend web service
-- PostgreSQL database
-- Environment variable handling
+### `backend-fastapi/railway.json`
+```json
+{
+  "$schema": "https://railway.app/railway.schema.json",
+  "build": {
+    "builder": "NIXPACKS"
+  },
+  "deploy": {
+    "startCommand": "uvicorn app.main:app --host 0.0.0.0 --port $PORT",
+    "healthcheckPath": "/api/health/",
+    "restartPolicyType": "ON_FAILURE",
+    "restartPolicyMaxRetries": 10
+  }
+}
+```
+
+### `backend-fastapi/Procfile`
+```
+web: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+```
 
 ---
 
@@ -125,8 +133,8 @@ Already configured with:
 
 After deployment, verify:
 
-- [ ] Frontend loads at: `https://budgetbuddy.vercel.app` (or `https://budgetbuddy-app.vercel.app`)
-- [ ] API health check: `https://budgetbuddy-backend.onrender.com/api/health/`
+- [ ] Frontend loads at: `https://budgetbuddy-app.vercel.app` (or `https://budgetbuddy-app-six.vercel.app`)
+- [ ] API health check: `https://<railway-domain>.up.railway.app/api/health/`
 - [ ] Login works with demo accounts
 - [ ] Expenses can be logged
 - [ ] Budgets can be created
@@ -141,20 +149,18 @@ After deployment, verify:
 cd frontend
 vercel --prod
 
-# Deploy backend (Render)
-# Via Vercel dashboard: Connect GitHub → Configure → Deploy
-
-# View logs
-vercel logs budgetbuddy.vercel.app
+# Deploy backend (Railway)
+# Connect GitHub repo in Railway dashboard or run:
+# railway up
 ```
 
 ---
 
 ## 🎉 Expected Deployment Summary
 
-**Frontend:** `https://budgetbuddy-app.vercel.app` (or `https://budgetbuddy-app-six.vercel.app`, `https://budgetbuddy.vercel.app`)  
-**Backend API:** `https://budgetbuddy-backend.onrender.com/api`  
-**Health Check:** `https://budgetbuddy-backend.onrender.com/api/health/`
+**Frontend:** `https://budgetbuddy-app.vercel.app`  
+**Backend API:** `https://<railway-domain>.up.railway.app/api`  
+**Health Check:** `https://<railway-domain>.up.railway.app/api/health/`
 
 **Demo Accounts:**
 - Student: student@budgetbuddy.local
@@ -166,13 +172,9 @@ vercel logs budgetbuddy.vercel.app
 ## 🆘 Troubleshooting
 
 **CORS Errors:**
-- Check `CORS_ORIGINS` in Render backend settings
-- Ensure it includes `https://budgetbuddy.vercel.app`
+- Check `CORS_ORIGINS` in Railway backend settings
+- Ensure it includes `https://budgetbuddy-app.vercel.app` and `https://budgetbuddy-app-six.vercel.app`
 
 **Database Connection Issues:**
-- Verify `DATABASE_URL` in Render environment variables
-- Check Supabase database is running
-
-**Build Failures:**
-- Run `npm install` and `npm run build` locally to test
-- Check Vercel build logs in dashboard
+- Verify `DATABASE_URL` in Railway environment variables
+- Check Supabase database is active
