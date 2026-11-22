@@ -8,7 +8,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, FileResponse
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.api.analytics import router as analytics_router
@@ -245,23 +245,3 @@ app.include_router(assistant_router, prefix="/api", tags=["assistant"])
 media_path = Path(settings.LOCAL_STORAGE_DIR)
 media_path.mkdir(parents=True, exist_ok=True)
 app.mount("/media", StaticFiles(directory=str(media_path)), name="media")
-
-# Static frontend SPA fallback (mount frontend/dist for Vercel serverless / full-stack deployment)
-possible_dist_paths = [
-    Path(__file__).resolve().parent.parent.parent / "frontend" / "dist",
-    Path("frontend/dist"),
-    Path("/var/task/frontend/dist"),
-]
-frontend_dist = next((p for p in possible_dist_paths if p.is_dir()), None)
-
-if frontend_dist:
-    index_html = frontend_dist / "index.html"
-
-    @app.get("/index.html")
-    @app.get("/")
-    async def serve_index():
-        if index_html.is_file():
-            return FileResponse(index_html)
-        return JSONResponse({"status": "ok", "service": "budgetbuddy-api"})
-
-    app.mount("/", StaticFiles(directory=str(frontend_dist), html=True), name="frontend-spa")

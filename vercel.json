@@ -17,7 +17,7 @@
       "destination": "/api/index.py?__vercel_path__=$1"
     },
     {
-      "source": "/(.*)",
+      "source": "/((?!assets/|favicon|icons|api/).*)",
       "destination": "/index.html"
     }
   ]
