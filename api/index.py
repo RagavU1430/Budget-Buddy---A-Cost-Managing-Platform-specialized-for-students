@@ -21,16 +21,16 @@ async def ensure_db_initialized():
         return
     _db_initialized = True
     try:
+        from app.db.base import Base
         from app.db.session import engine
         from app.db.security_fix import apply_database_security_hardening
+
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
 
         async with engine.connect() as conn:
             if conn.dialect.name == "postgresql":
                 await apply_database_security_hardening(conn)
-            else:
-                from app.db.base import Base
-                await conn.run_sync(Base.metadata.create_all)
-                await conn.commit()
     except Exception as exc:
         print("Database auto-init error:", exc)
 
