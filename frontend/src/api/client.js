@@ -2,7 +2,7 @@ import axios from 'axios'
 
 const API_BASE_URL = typeof import.meta.env.VITE_API_URL === 'string' && import.meta.env.VITE_API_URL
   ? import.meta.env.VITE_API_URL
-  : (import.meta.env.PROD ? 'https://budgetbuddy-app-six.vercel.app/api' : 'http://127.0.0.1:8000/api')
+  : '/api'
 
 // Only access token in localStorage (short-lived, 60 min)
 // Refresh token is stored in httpOnly cookie by backend

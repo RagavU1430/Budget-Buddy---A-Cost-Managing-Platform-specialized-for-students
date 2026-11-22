@@ -100,39 +100,35 @@ budgetbuddy/
 
 ## 🚀 Deployment
 
-### Option 1: Railway (Recommended - Backend API)
+### Option 1: Vercel Full-Stack Serverless (Recommended - Production)
 
-Deploy the backend to Railway with `backend-fastapi/railway.json` and `backend-fastapi/Procfile`:
+BudgetBuddy is architected to run 100% serverless on Vercel with zero standing container infrastructure:
 
 ```bash
-# 1. Connect GitHub repo to Railway
-# 2. Set Root Directory to backend-fastapi
-# 3. Add environment secrets:
-#    - DATABASE_URL (Supabase connection string)
+# 1. Connect GitHub repo to Vercel
+# 2. Add environment secrets in Vercel Dashboard:
+#    - VITE_API_URL=/api
+#    - DATABASE_URL (Supabase PostgreSQL connection string)
 #    - SECRET_KEY (64-character random string)
 #    - GEMINI_API_KEY (Google Gemini API key)
-# 4. Generate public domain in Railway Networking settings
+# 3. Vercel automatically builds frontend and deploys api/index.py serverless functions
 ```
 
-See `backend-fastapi/railway.json` and `VERCEL_DEPLOYMENT.md` for complete configuration.
+See `vercel.json` and `VERCEL_DEPLOYMENT.md` for complete configuration.
 
-### Option 2: Vercel + Railway (Frontend on Vercel, Backend on Railway)
+### Option 2: Local Development
 
-**Frontend (Vercel):**
+**Run Backend (FastAPI):**
+```bash
+cd backend-fastapi
+uvicorn app.main:app --reload --port 8000
+```
+
+**Run Frontend (Vite):**
 ```bash
 cd frontend
-vercel --prod
-```
-
-Configure environment variables in Vercel dashboard:
-- `VITE_API_URL` - Point to your Railway backend (e.g., https://budgetbuddy-backend.up.railway.app/api)
-
-**Backend (Railway):**
-```bash
-# In Railway dashboard:
-# 1. Create new Web Service from GitHub repo
-# 2. Set Root Directory: backend-fastapi
-# 3. Start Command: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+npm install
+npm run dev
 ```
 
 ### Option 3: Vercel Serverless (Experimental - Not Recommended for Production)

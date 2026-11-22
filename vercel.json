@@ -5,6 +5,18 @@
   "outputDirectory": "frontend/dist",
   "rewrites": [
     {
+      "source": "/api",
+      "destination": "/api/index.py?__vercel_path__=health/"
+    },
+    {
+      "source": "/api/",
+      "destination": "/api/index.py?__vercel_path__=health/"
+    },
+    {
+      "source": "/api/(.*)",
+      "destination": "/api/index.py?__vercel_path__=$1"
+    },
+    {
       "source": "/(.*)",
       "destination": "/index.html"
     }

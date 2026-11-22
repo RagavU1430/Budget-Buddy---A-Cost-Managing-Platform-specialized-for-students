@@ -143,15 +143,14 @@ class Settings(BaseSettings):
     # DRF PAGE_SIZE parity.
     PAGE_SIZE: int = 20
 
-    # CORS - Restricted to known domains and Railway deployment domains
+    # CORS - Restricted to known domains (Vercel serverless deployment)
     CORS_ORIGINS: str = (
         "http://localhost:5173,http://127.0.0.1:5173,"
         "https://budgetbuddy.vercel.app,https://budgetbuddy-student.vercel.app,"
-        "https://frontend-iota-black-70.vercel.app,https://budgetbuddy-app-six.vercel.app,"
-        "https://budgetbuddy-app.vercel.app,"
-        "https://backend-fastapi-production-c78c4b84.up.railway.app,https://*.up.railway.app"
+        "https://frontend-iota-black-70.vercel.app,https://budgetbuddy-app.vercel.app,"
+        "https://budgetbuddy-app-six.vercel.app"
     )
-    CORS_ORIGIN_REGEX: str = r"^https://.*\.up\.railway\.app$"
+    CORS_ORIGIN_REGEX: str = ""
 
     # Assistant
     GEMINI_API_KEY: str = ""

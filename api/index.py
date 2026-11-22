@@ -36,7 +36,11 @@ async def ensure_db_initialized():
 
 
 class VercelPathFixMiddleware:
-    """ASGI middleware to restore the original path and query string when Vercel rewrites to /api/index.py."""
+    """ASGI middleware to handle Vercel serverless path rewrites.
+    
+    Vercel rewrites /api/* to /api/index.py?__vercel_path__=..., so the path reaching
+    the app must be normalized back to the original FastAPI endpoint route.
+    """
 
     def __init__(self, asgi_app: ASGIApp):
         self.asgi_app = asgi_app
@@ -45,26 +49,27 @@ class VercelPathFixMiddleware:
         if scope["type"] in ("http", "websocket"):
             await ensure_db_initialized()
 
+            path = scope.get("path", "")
             query_bytes = scope.get("query_string", b"")
             query_str = query_bytes.decode("latin1", errors="ignore")
             query_params = parse_qs(query_str, keep_blank_values=True)
 
             if "__vercel_path__" in query_params:
-                matched_subpath = query_params.pop("__vercel_path__")[0]
-                clean_subpath = matched_subpath.lstrip("/")
-                # The FastAPI app normalizes paths by adding /api prefix,
-                # so we pass the path without /api here. The middleware will add it.
-                new_path = f"/{clean_subpath}" if clean_subpath else "/api"
+                vercel_path = query_params.pop("__vercel_path__")[0].strip()
+                scope["query_string"] = urlencode(query_params, doseq=True).encode("latin1")
+                vercel_path = vercel_path.lstrip("/")
+                new_path = f"/api/{vercel_path}" if vercel_path else "/api/health/"
                 scope["path"] = new_path
                 scope["raw_path"] = new_path.encode("latin1")
-
-                clean_pairs = []
-                for k, vals in query_params.items():
-                    for v in vals:
-                        clean_pairs.append((k, v))
-                new_query = urlencode(clean_pairs)
-                scope["query_string"] = new_query.encode("latin1")
-            elif scope.get("path") in ("/api", "/api/", "/api/index.py"):
+            elif path.startswith("/api/index.py"):
+                # Strip /api/index.py prefix to get the actual API path
+                new_path = path[len("/api/index.py"):] or "/"
+                # Ensure it starts with /api for the FastAPI app's path normalization
+                if not new_path.startswith("/api"):
+                    new_path = f"/api{new_path}"
+                scope["path"] = new_path
+                scope["raw_path"] = new_path.encode("latin1")
+            elif path in ("/api", "/api/"):
                 scope["path"] = "/api/health/"
                 scope["raw_path"] = b"/api/health/"
 
