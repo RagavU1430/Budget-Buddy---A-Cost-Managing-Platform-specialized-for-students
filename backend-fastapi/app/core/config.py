@@ -146,8 +146,9 @@ class Settings(BaseSettings):
     # CORS - Restricted to known domains only (no wildcard regex)
     CORS_ORIGINS: str = (
         "http://localhost:5173,http://127.0.0.1:5173,"
-        "https://budgetbuddy-student.vercel.app,https://frontend-iota-black-70.vercel.app,"
-        "https://budgetbuddy-app-six.vercel.app"
+        "https://budgetbuddy.vercel.app,https://budgetbuddy-student.vercel.app,"
+        "https://frontend-iota-black-70.vercel.app,https://budgetbuddy-app-six.vercel.app,"
+        "https://budgetbuddy-app.vercel.app,https://budgetbuddy-frontend.onrender.com"
     )
     # CORS_ORIGIN_REGEX removed — use explicit CORS_ORIGINS list for security
 

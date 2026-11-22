@@ -42,7 +42,7 @@ vercel link
 
 | Variable | Value | Environment |
 |----------|-------|-------------|
-| `VITE_API_URL` | `https://budgetbuddy-api.onrender.com` | Production |
+| `VITE_API_URL` | `https://budgetbuddy-backend.onrender.com/api` | Production |
 | `VITE_APP_NAME` | `Budget Buddy` | Production |
 | `VITE_APP_VERSION` | `2.0.0` | Production |
 
@@ -59,7 +59,7 @@ vercel --prod
 
 1. **Go to render.com** and create a new Web Service
 2. **Service Configuration:**
-   - Name: `budgetbuddy-api`
+   - Name: `budgetbuddy-backend`
    - Root Directory: `backend-fastapi/`
    - Build Command: `pip install -r requirements.txt`
    - Start Command: `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
@@ -67,7 +67,7 @@ vercel --prod
 3. **Environment Variables in Render:**
    - `DATABASE_URL`: Your Supabase connection string
    - `SECRET_KEY`: Generate with `python -c "import secrets; print(secrets.token_urlsafe(64))"`
-   - `CORS_ORIGINS`: `https://budgetbuddy-student.vercel.app,https://frontend-iota-black-70.vercel.app,http://localhost:5173`
+   - `CORS_ORIGINS`: `https://budgetbuddy-app.vercel.app,https://budgetbuddy-app-six.vercel.app,https://budgetbuddy.vercel.app,https://budgetbuddy-student.vercel.app,https://frontend-iota-black-70.vercel.app,http://localhost:5173`
    - `DEBUG`: `false`
    - `STORAGE_BACKEND`: `supabase`
 
@@ -125,8 +125,8 @@ Already configured with:
 
 After deployment, verify:
 
-- [ ] Frontend loads at: `https://budgetbuddy.vercel.app`
-- [ ] API health check: `https://budgetbuddy-api.onrender.com/api/health/`
+- [ ] Frontend loads at: `https://budgetbuddy.vercel.app` (or `https://budgetbuddy-app.vercel.app`)
+- [ ] API health check: `https://budgetbuddy-backend.onrender.com/api/health/`
 - [ ] Login works with demo accounts
 - [ ] Expenses can be logged
 - [ ] Budgets can be created
@@ -152,9 +152,9 @@ vercel logs budgetbuddy.vercel.app
 
 ## 🎉 Expected Deployment Summary
 
-**Frontend:** `https://budgetbuddy.vercel.app`  
-**Backend API:** `https://budgetbuddy-api.onrender.com`  
-**Health Check:** `https://budgetbuddy-api.onrender.com/api/health/`
+**Frontend:** `https://budgetbuddy-app.vercel.app` (or `https://budgetbuddy-app-six.vercel.app`, `https://budgetbuddy.vercel.app`)  
+**Backend API:** `https://budgetbuddy-backend.onrender.com/api`  
+**Health Check:** `https://budgetbuddy-backend.onrender.com/api/health/`
 
 **Demo Accounts:**
 - Student: student@budgetbuddy.local

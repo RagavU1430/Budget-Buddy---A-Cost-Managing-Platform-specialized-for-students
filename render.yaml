@@ -34,7 +34,7 @@ services:
         sync: false
         description: "Google Gemini API key for AI assistant"
       - key: CORS_ORIGINS
-        value: 'https://budgetbuddy-student.vercel.app,https://frontend-iota-black-70.vercel.app,http://localhost:5173,https://budgetbuddy-frontend.onrender.com'
+        value: 'https://budgetbuddy.vercel.app,https://budgetbuddy-student.vercel.app,https://frontend-iota-black-70.vercel.app,https://budgetbuddy-app-six.vercel.app,https://budgetbuddy-app.vercel.app,http://localhost:5173,https://budgetbuddy-frontend.onrender.com'
       - key: STORAGE_BACKEND
         value: 'supabase'
       - key: DEBUG
@@ -88,7 +88,7 @@ services:
         destination: /index.html
     envVars:
       - key: VITE_API_URL
-        value: https://budgetbuddy-backend.onrender.com
+        value: https://budgetbuddy-backend.onrender.com/api
     autoDeploy: true
     branches:
       main:
