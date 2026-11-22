@@ -8,7 +8,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.api.analytics import router as analytics_router
@@ -201,7 +201,22 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
 @app.middleware("http")
 async def normalize_api_path(request: Request, call_next):
     path = request.scope.get("path", "")
-    if path and not path.startswith("/api") and path != "/" and not path.startswith("/docs") and not path.startswith("/redoc") and not path.startswith("/openapi"):
+    if (
+        path
+        and not path.startswith("/api")
+        and path != "/"
+        and not path.startswith("/docs")
+        and not path.startswith("/redoc")
+        and not path.startswith("/openapi")
+        and not path.startswith("/assets")
+        and not path.endswith(".html")
+        and not path.endswith(".js")
+        and not path.endswith(".css")
+        and not path.endswith(".svg")
+        and not path.endswith(".ico")
+        and not path.endswith(".png")
+        and not path.endswith(".json")
+    ):
         request.scope["path"] = f"/api{path}"
     response = await call_next(request)
     return response
@@ -212,7 +227,6 @@ async def normalize_api_path(request: Request, call_next):
 @app.get("/api/health")
 @app.get("/health/")
 @app.get("/health")
-@app.get("/")
 async def health():
     return {"status": "ok", "service": "budgetbuddy-api"}
 
@@ -231,3 +245,23 @@ app.include_router(assistant_router, prefix="/api", tags=["assistant"])
 media_path = Path(settings.LOCAL_STORAGE_DIR)
 media_path.mkdir(parents=True, exist_ok=True)
 app.mount("/media", StaticFiles(directory=str(media_path)), name="media")
+
+# Static frontend SPA fallback (mount frontend/dist for Vercel serverless / full-stack deployment)
+possible_dist_paths = [
+    Path(__file__).resolve().parent.parent.parent / "frontend" / "dist",
+    Path("frontend/dist"),
+    Path("/var/task/frontend/dist"),
+]
+frontend_dist = next((p for p in possible_dist_paths if p.is_dir()), None)
+
+if frontend_dist:
+    index_html = frontend_dist / "index.html"
+
+    @app.get("/index.html")
+    @app.get("/")
+    async def serve_index():
+        if index_html.is_file():
+            return FileResponse(index_html)
+        return JSONResponse({"status": "ok", "service": "budgetbuddy-api"})
+
+    app.mount("/", StaticFiles(directory=str(frontend_dist), html=True), name="frontend-spa")

@@ -45,7 +45,12 @@ def _connect_args(url: str) -> dict[str, Any]:
         is_serverless = bool(os.getenv("VERCEL") or os.getenv("AWS_LAMBDA_FUNCTION_NAME"))
         hostname = parsed.hostname
         if hostname and (hostname not in ("localhost", "127.0.0.1") or is_serverless):
-            args["ssl"] = True  # asyncpg expects True/False/SSLContext, not string "require"
+            import ssl
+
+            ctx = ssl.create_default_context()
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+            args["ssl"] = ctx
     except Exception:
         pass
     return args
