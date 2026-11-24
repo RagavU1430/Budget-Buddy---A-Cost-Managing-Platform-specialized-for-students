@@ -266,7 +266,21 @@ If you didn't request this, please ignore this email.
 
 
 def dispatch_email_in_background(to_email: str, subject: str, html_body: str, text_body: str) -> None:
-    """Non-blocking background launcher that will never block callers or fail requests."""
+    """Non-blocking background launcher with serverless execution protection."""
+    if not to_email:
+        return
+
+    import os
+    is_serverless = bool(os.getenv("VERCEL") or os.getenv("AWS_LAMBDA_FUNCTION_NAME"))
+    if is_serverless:
+        # In serverless functions (Vercel / Lambda), background threads/tasks are frozen
+        # as soon as the HTTP response finishes. Execute directly to guarantee delivery before freeze.
+        try:
+            _send_smtp_sync(to_email, subject, html_body, text_body)
+        except Exception as exc:
+            logger.warning("Serverless email dispatch error: %s", exc)
+        return
+
     try:
         loop = asyncio.get_running_loop()
         loop.create_task(send_email_async(to_email, subject, html_body, text_body))
