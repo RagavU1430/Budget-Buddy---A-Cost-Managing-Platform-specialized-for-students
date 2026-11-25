@@ -1064,18 +1064,22 @@ async def reset_all_amounts(user: CurrentUser, db: DbSession):
         "goals": int(goal_res.rowcount or 0),
     }
 
-    profile = await _ensure_profile(db, user)
+    profile = user.profile
+    if profile is None:
+        profile = models.Profile(user_id=user.id)
+        db.add(profile)
+        await db.flush()
+
     previous_monthly_income = profile.monthly_income
     profile.monthly_income = Decimal("0")
 
     await record_amounts_reset_notification(db, user, deleted_counts, previous_monthly_income)
     await db.commit()
-    await db.refresh(user)
 
     return {
         "detail": "All financial amounts have been reset.",
         "summary": deleted_counts,
-        "user": user_dict(user, user.profile),
+        "user": user_dict(user, profile),
     }
 
 
