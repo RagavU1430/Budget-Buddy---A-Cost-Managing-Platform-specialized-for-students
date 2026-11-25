@@ -13,6 +13,7 @@ import {
   LogOut,
   Mail,
   Phone,
+  RotateCcw,
   Save,
   Shield,
   Sliders,
@@ -98,6 +99,8 @@ export default function Profile() {
   const [saving, setSaving] = useState(false)
   const [passwordStatus, setPasswordStatus] = useState({ message: '', type: 'error' })
   const [passwordSaving, setPasswordSaving] = useState(false)
+  const [resetModalOpen, setResetModalOpen] = useState(false)
+  const [resettingAmounts, setResettingAmounts] = useState(false)
 
   // Email change verification
   const [emailModalOpen, setEmailModalOpen] = useState(false)
@@ -264,6 +267,27 @@ export default function Profile() {
   const handleLogout = () => {
     logout()
     navigate('/login', { replace: true })
+  }
+
+  const handleResetAllAmounts = async () => {
+    setResettingAmounts(true)
+    setStatus({ message: '', type: 'error' })
+    try {
+      const { data } = await api.post('/auth/reset-amounts/')
+      setFinancialForm((prev) => ({ ...prev, monthly_income: 0 }))
+      await fetchMe()
+      window.dispatchEvent(new Event('budgetbuddy:data-refresh'))
+      setResetModalOpen(false)
+      setStatus({
+        message: data.detail || 'All financial amounts have been reset and a confirmation email has been sent.',
+        type: 'success',
+      })
+    } catch (err) {
+      setResetModalOpen(false)
+      setStatus({ message: formatError(err), type: 'error' })
+    } finally {
+      setResettingAmounts(false)
+    }
   }
 
   const roleConfig = roleBadgeMap[user?.role] || { label: user?.role, tone: 'neutral', icon: '👤' }
@@ -871,6 +895,26 @@ export default function Profile() {
             </p>
           </div>
 
+          {/* Reset All Amounts */}
+          <div className="glass rounded-3xl p-5 border border-danger/25">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <div className="text-xs font-bold text-fg">Reset All Amounts</div>
+                <div className="text-[11px] text-fg-muted mt-0.5">
+                  Remove all money records &amp; reset income to 0 without touching your profile
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setResetModalOpen(true)}
+                className="inline-flex shrink-0 cursor-pointer items-center gap-1.5 rounded-xl border border-danger/30 bg-danger-soft/40 px-3 py-1.5 text-xs font-semibold text-danger hover:bg-danger-soft/70 transition-colors"
+              >
+                <RotateCcw className="h-3.5 w-3.5" />
+                <span>Reset</span>
+              </button>
+            </div>
+          </div>
+
           {/* Danger Zone / Session Logout */}
           <div className="glass rounded-3xl p-5 border border-line">
             <div className="flex items-center justify-between">
@@ -956,6 +1000,47 @@ export default function Profile() {
             </button>
           </form>
         )}
+      </Modal>
+
+      <Modal
+        open={resetModalOpen}
+        onClose={() => !resettingAmounts && setResetModalOpen(false)}
+        title="Reset all financial amounts?"
+        subtitle="This will clear all monetary data while keeping your profile and account untouched."
+      >
+        <div className="space-y-4">
+          <div className="rounded-2xl border border-danger/30 bg-danger-soft/20 p-4 text-xs leading-relaxed text-fg-muted space-y-1.5">
+            <p className="font-semibold text-danger">What will be cleared:</p>
+            <ul className="list-disc pl-4 space-y-1">
+              <li>All logged expenses and incomes</li>
+              <li>All category budgets and savings goals</li>
+              <li>Monthly income will be reset to 0</li>
+            </ul>
+            <p className="pt-1.5 text-fg">
+              Your profile details, currency, password, and account will <span className="font-semibold">not</span> be touched. A confirmation email will be sent to <span className="font-semibold text-fg">{user?.email}</span>.
+            </p>
+          </div>
+
+          <div className="flex items-center justify-end gap-3 pt-2">
+            <button
+              type="button"
+              disabled={resettingAmounts}
+              onClick={() => setResetModalOpen(false)}
+              className="rounded-xl border border-line bg-surface px-4 py-2 text-xs font-semibold text-fg hover:bg-surface-strong disabled:opacity-60 cursor-pointer"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              disabled={resettingAmounts}
+              onClick={handleResetAllAmounts}
+              className="inline-flex items-center gap-1.5 rounded-xl bg-danger px-4 py-2 text-xs font-bold text-white hover:opacity-90 disabled:opacity-60 cursor-pointer"
+            >
+              <RotateCcw className="h-3.5 w-3.5" />
+              <span>{resettingAmounts ? 'Resetting…' : 'Yes, Reset All Amounts'}</span>
+            </button>
+          </div>
+        </div>
       </Modal>
     </div>
   )

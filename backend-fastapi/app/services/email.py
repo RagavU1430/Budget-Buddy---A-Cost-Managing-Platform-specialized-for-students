@@ -559,3 +559,77 @@ https://budgetbuddy-student.vercel.app/goals
         _base_email_template(subject, preheader, html_content),
         text_body,
     )
+
+
+def notify_amounts_reset(
+    user_email: str,
+    user_name: str,
+    deleted_counts: dict[str, int],
+    previous_monthly_income: Any,
+) -> None:
+    """Send confirmation email when the user resets all financial amounts from their profile."""
+    prev_income_str = f"₹{float(previous_monthly_income or 0):,.2f}"
+    subject = "🔄 Financial Amounts Reset on BudgetBuddy"
+    preheader = "All your financial amounts have been cleared. Your profile and account settings remain untouched."
+
+    expenses_cnt = deleted_counts.get("expenses", 0)
+    incomes_cnt = deleted_counts.get("incomes", 0)
+    budgets_cnt = deleted_counts.get("budgets", 0)
+    goals_cnt = deleted_counts.get("goals", 0)
+
+    html_content = f"""
+      <span class="badge badge-expense">Account Financial Reset</span>
+      <div class="amount-hero amount-goal">₹0.00</div>
+      <p style="margin: 0 0 16px 0; color: #94A3B8; font-size: 15px;">
+        Hi {user_name}, you requested a full reset of all financial amounts on your BudgetBuddy account. All monetary records have been cleared while keeping your profile and account settings untouched.
+      </p>
+
+      <div class="details-card">
+        <table style="width: 100%; border-collapse: collapse;">
+          <tr style="border-bottom: 1px solid rgba(148, 163, 184, 0.1);">
+            <td style="padding: 8px 0; color: #94A3B8; font-size: 14px;">Expenses Removed</td>
+            <td style="padding: 8px 0; text-align: right; font-weight: 600; color: #F8FAFC; font-size: 14px;">{expenses_cnt}</td>
+          </tr>
+          <tr style="border-bottom: 1px solid rgba(148, 163, 184, 0.1);">
+            <td style="padding: 8px 0; color: #94A3B8; font-size: 14px;">Incomes Removed</td>
+            <td style="padding: 8px 0; text-align: right; font-weight: 600; color: #F8FAFC; font-size: 14px;">{incomes_cnt}</td>
+          </tr>
+          <tr style="border-bottom: 1px solid rgba(148, 163, 184, 0.1);">
+            <td style="padding: 8px 0; color: #94A3B8; font-size: 14px;">Budgets Cleared</td>
+            <td style="padding: 8px 0; text-align: right; font-weight: 600; color: #F8FAFC; font-size: 14px;">{budgets_cnt}</td>
+          </tr>
+          <tr style="border-bottom: 1px solid rgba(148, 163, 184, 0.1);">
+            <td style="padding: 8px 0; color: #94A3B8; font-size: 14px;">Savings Goals Cleared</td>
+            <td style="padding: 8px 0; text-align: right; font-weight: 600; color: #F8FAFC; font-size: 14px;">{goals_cnt}</td>
+          </tr>
+          <tr>
+            <td style="padding: 8px 0; color: #94A3B8; font-size: 14px;">Monthly Income</td>
+            <td style="padding: 8px 0; text-align: right; font-weight: 600; color: #10B981; font-size: 14px;">{prev_income_str} → ₹0.00</td>
+          </tr>
+        </table>
+      </div>
+
+      <a href="https://budgetbuddy-student.vercel.app/" class="btn">Open Dashboard</a>
+    """
+
+    text_body = f"""Hi {user_name},
+
+Your BudgetBuddy financial amounts have been reset to ₹0.00.
+Your personal profile, login credentials, and account settings remain untouched.
+
+Summary of cleared records:
+- Expenses removed: {expenses_cnt}
+- Incomes removed: {incomes_cnt}
+- Budgets cleared: {budgets_cnt}
+- Savings goals cleared: {goals_cnt}
+- Monthly income: {prev_income_str} -> ₹0.00
+
+View your dashboard:
+https://budgetbuddy-student.vercel.app/
+"""
+    dispatch_email_in_background(
+        user_email,
+        subject,
+        _base_email_template(subject, preheader, html_content),
+        text_body,
+    )

@@ -23,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import models
 from app.services.email import (
+    notify_amounts_reset,
     notify_expense_created,
     notify_income_created,
     notify_goal_created,
@@ -296,5 +297,38 @@ async def record_goal_deposit_notification(
             current_amount=goal.current_amount,
             target_amount=goal.target_amount,
             is_completed=goal.is_completed,
+        )
+
+
+async def record_amounts_reset_notification(
+    db: AsyncSession,
+    user: models.User,
+    deleted_counts: dict[str, int],
+    previous_monthly_income: Any,
+) -> None:
+    """Record in-app notification and dispatch email when all financial amounts are reset."""
+    user_name = user.first_name or user.username or "Student"
+    total_items = sum(deleted_counts.values())
+
+    notification = models.Notification(
+        user_id=user.id,
+        notification_type="system",
+        title="All financial amounts reset",
+        message=(
+            f"Cleared {total_items} financial records "
+            f"(expenses: {deleted_counts.get('expenses', 0)}, "
+            f"incomes: {deleted_counts.get('incomes', 0)}, "
+            f"budgets: {deleted_counts.get('budgets', 0)}, "
+            f"goals: {deleted_counts.get('goals', 0)}) and reset monthly income to ₹0.00."
+        ),
+    )
+    db.add(notification)
+
+    if user.email:
+        notify_amounts_reset(
+            user_email=user.email,
+            user_name=user_name,
+            deleted_counts=deleted_counts,
+            previous_monthly_income=previous_monthly_income,
         )
 

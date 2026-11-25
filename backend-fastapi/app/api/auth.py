@@ -1041,6 +1041,45 @@ async def verify_email_change(request: Request, user: CurrentUser, db: DbSession
 
 
 # ---------------------------------------------------------------------------
+# POST /api/auth/reset-amounts/
+# ---------------------------------------------------------------------------
+@router.post("/reset-amounts/", response_model=None)
+async def reset_all_amounts(user: CurrentUser, db: DbSession):
+    """Remove all monetary records (expenses, incomes, budgets, goals) and reset monthly income to 0.
+
+    Keeps the user's account, profile settings, currency, and login session completely untouched,
+    and dispatches a confirmation email to the user.
+    """
+    from app.services.notifications import record_amounts_reset_notification
+
+    exp_res = await db.execute(delete(models.Expense).where(models.Expense.user_id == user.id))
+    inc_res = await db.execute(delete(models.Income).where(models.Income.user_id == user.id))
+    bud_res = await db.execute(delete(models.Budget).where(models.Budget.user_id == user.id))
+    goal_res = await db.execute(delete(models.SavingsGoal).where(models.SavingsGoal.user_id == user.id))
+
+    deleted_counts = {
+        "expenses": int(exp_res.rowcount or 0),
+        "incomes": int(inc_res.rowcount or 0),
+        "budgets": int(bud_res.rowcount or 0),
+        "goals": int(goal_res.rowcount or 0),
+    }
+
+    profile = await _ensure_profile(db, user)
+    previous_monthly_income = profile.monthly_income
+    profile.monthly_income = Decimal("0")
+
+    await record_amounts_reset_notification(db, user, deleted_counts, previous_monthly_income)
+    await db.commit()
+    await db.refresh(user)
+
+    return {
+        "detail": "All financial amounts have been reset.",
+        "summary": deleted_counts,
+        "user": user_dict(user, user.profile),
+    }
+
+
+# ---------------------------------------------------------------------------
 # GET /api/auth/admin-only/
 # ---------------------------------------------------------------------------
 @router.get("/admin-only/", response_model=None)
