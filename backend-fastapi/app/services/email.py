@@ -312,6 +312,7 @@ def notify_expense_created(
     clean_cat = category.replace("_", " ").title()
     subject = f"💸 Expense Alert: {clean_amt} spent on {clean_cat}"
     preheader = f"You recorded an expense of {clean_amt} for '{title}' on {date_str}."
+    frontend_url = settings.FRONTEND_URL.rstrip("/")
 
     html_content = f"""
       <span class="badge badge-expense">Money Deducted</span>
@@ -341,7 +342,7 @@ def notify_expense_created(
         </table>
       </div>
 
-      <a href="https://budgetbuddy-student.vercel.app/analytics" class="btn">View Analytics & Budget</a>
+      <a href="{frontend_url}/analytics" class="btn">View Analytics & Budget</a>
     """
 
     text_body = f"""Hi {user_name},
@@ -354,7 +355,7 @@ Payment Method: {payment_method.upper()}
 Date: {date_str}
 
 Check your updated spending trends at:
-https://budgetbuddy-student.vercel.app/analytics
+{frontend_url}/analytics
 """
     dispatch_email_in_background(
         user_email,
@@ -377,6 +378,7 @@ def notify_income_created(
     clean_source = source_type.replace("_", " ").title()
     subject = f"💰 Income Credited: {clean_amt} added ({clean_source})"
     preheader = f"Great news! {clean_amt} was credited to your account from '{title}'."
+    frontend_url = settings.FRONTEND_URL.rstrip("/")
 
     html_content = f"""
       <span class="badge badge-income">Money Credited</span>
@@ -402,7 +404,7 @@ def notify_income_created(
         </table>
       </div>
 
-      <a href="https://budgetbuddy-student.vercel.app/dashboard" class="btn">View Dashboard</a>
+      <a href="{frontend_url}/dashboard" class="btn">View Dashboard</a>
     """
 
     text_body = f"""Hi {user_name},
@@ -414,7 +416,7 @@ Title: {title}
 Date: {date_str}
 
 Check your updated balance at:
-https://budgetbuddy-student.vercel.app/dashboard
+{frontend_url}/dashboard
 """
     dispatch_email_in_background(
         user_email,
@@ -437,6 +439,7 @@ def notify_goal_created(
     deadline = target_date_str or "No deadline"
     subject = f"🎯 New Savings Goal Set: {title}"
     preheader = f"You set a new savings target of {clean_target} for '{title}'."
+    frontend_url = settings.FRONTEND_URL.rstrip("/")
 
     html_content = f"""
       <span class="badge badge-goal">New Goal Created</span>
@@ -466,7 +469,7 @@ def notify_goal_created(
         </table>
       </div>
 
-      <a href="https://budgetbuddy-student.vercel.app/goals" class="btn">Track Your Goal</a>
+      <a href="{frontend_url}/goals" class="btn">Track Your Goal</a>
     """
 
     text_body = f"""Hi {user_name},
@@ -478,7 +481,7 @@ Priority: {priority.upper()}
 Target Deadline: {deadline}
 
 Track your progress:
-https://budgetbuddy-student.vercel.app/goals
+{frontend_url}/goals
 """
     dispatch_email_in_background(
         user_email,
@@ -502,6 +505,7 @@ def notify_goal_deposit(
     clean_cur = f"₹{float(current_amount):,.2f}"
     clean_tgt = f"₹{float(target_amount):,.2f}"
     pct = round((float(current_amount) / max(float(target_amount), 1)) * 100, 1)
+    frontend_url = settings.FRONTEND_URL.rstrip("/")
 
     if is_completed:
         subject = f"🎉 Goal Reached: '{title}' is 100% Completed!"
@@ -540,7 +544,7 @@ def notify_goal_deposit(
         </table>
       </div>
 
-      <a href="https://budgetbuddy-student.vercel.app/goals" class="btn">View Goal Details</a>
+      <a href="{frontend_url}/goals" class="btn">View Goal Details</a>
     """
 
     text_body = f"""Hi {user_name},
@@ -551,7 +555,7 @@ Deposit: +{clean_dep}
 Total Saved: {clean_cur} of {clean_tgt} ({pct}%)
 
 View your goals:
-https://budgetbuddy-student.vercel.app/goals
+{frontend_url}/goals
 """
     dispatch_email_in_background(
         user_email,
@@ -571,6 +575,7 @@ def notify_amounts_reset(
     prev_income_str = f"₹{float(previous_monthly_income or 0):,.2f}"
     subject = "🔄 Financial Amounts Reset on BudgetBuddy"
     preheader = "All your financial amounts have been cleared. Your profile and account settings remain untouched."
+    frontend_url = settings.FRONTEND_URL.rstrip("/")
 
     expenses_cnt = deleted_counts.get("expenses", 0)
     incomes_cnt = deleted_counts.get("incomes", 0)
@@ -609,7 +614,7 @@ def notify_amounts_reset(
         </table>
       </div>
 
-      <a href="https://budgetbuddy-student.vercel.app/" class="btn">Open Dashboard</a>
+      <a href="{frontend_url}/" class="btn">Open Dashboard</a>
     """
 
     text_body = f"""Hi {user_name},
@@ -625,7 +630,7 @@ Summary of cleared records:
 - Monthly income: {prev_income_str} -> ₹0.00
 
 View your dashboard:
-https://budgetbuddy-student.vercel.app/
+{frontend_url}/
 """
     dispatch_email_in_background(
         user_email,

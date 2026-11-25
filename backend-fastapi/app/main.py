@@ -105,11 +105,11 @@ async def add_security_headers(request: Request, call_next):
     response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
     return response
 
-# CORS Configuration - explicit origins and Railway deployment domains
+# CORS Configuration - explicit origins only (no wildcard regex for security)
+# If you need Railway preview deployments, add specific URLs to CORS_ORIGINS env var
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
-    allow_origin_regex=getattr(settings, "CORS_ORIGIN_REGEX", r"^https://.*\.up\.railway\.app$"),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

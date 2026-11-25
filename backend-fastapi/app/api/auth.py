@@ -31,7 +31,7 @@ logger = logging.getLogger("budgetbuddy.auth")
 
 import jwt
 from fastapi import APIRouter, Request, Response
-from sqlalchemy import delete, func, select, update, update
+from sqlalchemy import delete, func, select, update
 
 from app.api.deps import AdminUser, CurrentUser, DbSession, json_body, parse_pk
 from app.core.config import settings
@@ -419,19 +419,11 @@ def _refresh_failure() -> APIError:
 
 
 async def _do_refresh(request: Request, db: DbSession, response: Response):
-    # Read refresh token from httpOnly cookie (preferred) or body (fallback for non-browser clients)
+    # Read refresh token ONLY from httpOnly cookie (security: no body fallback to prevent CSRF)
     refresh_token = request.cookies.get("budgetbuddy.refresh")
 
-    body = await json_body(request)
     if not refresh_token:
-        if "refresh" not in body or body["refresh"] is None:
-            raise validation_error({"refresh": [REQUIRED]})
-        raw = body["refresh"]
-        if isinstance(raw, bool) or not isinstance(raw, (str, int, float)):
-            raise validation_error({"refresh": ["Not a valid string."]})
-        refresh_token = str(raw).strip()
-        if not refresh_token:
-            raise validation_error({"refresh": [BLANK]})
+        raise validation_error({"refresh": [REQUIRED]})
 
     try:
         payload = decode_token(refresh_token, expected_type="refresh")
@@ -518,12 +510,8 @@ async def token_refresh_compat(request: Request, db: DbSession, response: Respon
 @router.post("/logout/", response_model=None)
 async def logout(request: Request, db: DbSession, response: Response):
     """Logout endpoint - blacklists the refresh token JTI and clears cookies."""
-    # Read refresh token from httpOnly cookie (preferred) or body (fallback)
+    # Read refresh token ONLY from httpOnly cookie (security: no body fallback to prevent CSRF)
     refresh_token = request.cookies.get("budgetbuddy.refresh")
-
-    body = await json_body(request)
-    if not refresh_token:
-        refresh_token = body.get("refresh")
 
     if refresh_token:
         try:
@@ -661,7 +649,13 @@ def _profile_field_errors(body: dict[str, Any]) -> dict[str, list[str]]:
     if "financial_preferences" in body:
         # DRF JSONField: passes through anything json.dumps accepts.
         try:
-            json.dumps(body["financial_preferences"])
+            prefs = body["financial_preferences"]
+            # Prevent DoS via large JSON payloads
+            json_str = json.dumps(prefs)
+            if len(json_str) > 10000:  # 10KB limit
+                errors.setdefault("financial_preferences", []).append(
+                    "Financial preferences payload too large (max 10KB)."
+                )
         except (TypeError, ValueError):
             errors.setdefault("financial_preferences", []).append("Value must be valid JSON.")
 
@@ -742,8 +736,14 @@ async def change_password(request: Request, user: CurrentUser, db: DbSession):
         raise validation_error({"current_password": ["Current password is incorrect."]})
 
     user.password = hash_password(new_password)
+
+    # Invalidate all existing refresh tokens for this user (force re-login on all devices)
+    await db.execute(
+        delete(models.RefreshToken).where(models.RefreshToken.user_id == user.id)
+    )
+
     await db.commit()
-    return {"detail": "Password updated."}
+    return {"detail": "Password updated. You will need to log in again on all devices."}
 
 
 def _otp_hash(code: str) -> str:
@@ -966,21 +966,32 @@ async def verify_email_change(request: Request, user: CurrentUser, db: DbSession
         await db.commit()
         raise validation_error({"code": ["The verification code has expired."]})
 
-    # Atomic increment of attempts with single UPDATE - prevents race condition
-    # Check attempts BEFORE increment to enforce 5-attempt limit correctly
-    if pending.attempts >= 5:
-        await db.delete(pending)
-        await db.commit()
-        raise validation_error({"code": ["Too many incorrect attempts. Request a new code."]})
+    # Atomic increment with conditional check to prevent race condition.
+    # Uses a single UPDATE with CASE and RETURNING to atomically:
+    # 1. Check if attempts >= 5 (if so, return attempts unchanged and we reject)
+    # 2. If attempts < 5, increment and return new value
+    # 3. If code is wrong, commit the increment; if correct, proceed without incrementing
+    from sqlalchemy import case
 
-    if not hmac.compare_digest(pending.otp_hash, _otp_hash(code)):
-        # Atomic increment: UPDATE ... SET attempts = attempts + 1 WHERE ...
-        await db.execute(
+    # First verify the code - if correct, we don't increment attempts
+    if hmac.compare_digest(pending.otp_hash, _otp_hash(code)):
+        # Code is correct - proceed without incrementing attempts
+        pass
+    else:
+        # Code is incorrect - atomically increment attempts and check limit
+        result = await db.execute(
             update(models.EmailChangeRequest)
             .where(models.EmailChangeRequest.id == pending.id)
+            .where(models.EmailChangeRequest.attempts < 5)
             .values(attempts=models.EmailChangeRequest.attempts + 1)
+            .returning(models.EmailChangeRequest.attempts)
         )
+        new_attempts = result.scalar_one_or_none()
         await db.commit()
+
+        if new_attempts is None:
+            # No row updated means attempts was already >= 5
+            raise validation_error({"code": ["Too many incorrect attempts. Request a new code."]})
         raise validation_error({"code": ["The verification code is incorrect."]})
 
     existing = (
@@ -1044,7 +1055,7 @@ async def verify_email_change(request: Request, user: CurrentUser, db: DbSession
 # POST /api/auth/reset-amounts/
 # ---------------------------------------------------------------------------
 @router.post("/reset-amounts/", response_model=None)
-async def reset_all_amounts(user: CurrentUser, db: DbSession):
+async def reset_all_amounts(user: CurrentUser, db: DbSession, response: Response):
     """Remove all monetary records (expenses, incomes, budgets, goals) and reset monthly income to 0.
 
     Keeps the user's account, profile settings, currency, and login session completely untouched,
@@ -1064,17 +1075,35 @@ async def reset_all_amounts(user: CurrentUser, db: DbSession):
         "goals": int(goal_res.rowcount or 0),
     }
 
+    # Ensure profile exists and is attached to user
     profile = user.profile
     if profile is None:
         profile = models.Profile(user_id=user.id)
         db.add(profile)
         await db.flush()
+        user.profile = profile
 
     previous_monthly_income = profile.monthly_income
     profile.monthly_income = Decimal("0")
 
+    # Blacklist all refresh tokens for this user (force re-login)
+    from datetime import datetime, timezone
+    await db.execute(
+        delete(models.RefreshToken).where(models.RefreshToken.user_id == user.id)
+    )
+
     await record_amounts_reset_notification(db, user, deleted_counts, previous_monthly_income)
     await db.commit()
+    await db.refresh(user)
+
+    # Clear refresh cookie since all tokens are revoked
+    is_production = not settings.DEBUG
+    response.delete_cookie(
+        key="budgetbuddy.refresh",
+        path="/",
+        secure=is_production,
+        samesite="strict",
+    )
 
     return {
         "detail": "All financial amounts have been reset.",
@@ -1116,7 +1145,7 @@ async def _get_admin_user(db: DbSession, raw_pk: str) -> models.User:
 
 
 async def _admin_update_role(
-    pk: str, request: Request, db: DbSession, *, partial: bool
+    pk: str, request: Request, user: AdminUser, db: DbSession, *, partial: bool
 ):
     target = await _get_admin_user(db, pk)
     body = await json_body(request)
@@ -1134,6 +1163,18 @@ async def _admin_update_role(
     if value not in models.USER_ROLES:
         raise validation_error({"role": [f'"{value}" is not a valid choice.']})
 
+    # Prevent admin from demoting themselves (last admin protection)
+    if target.id == user.id and value != "admin":
+        raise validation_error({"role": ["Cannot demote yourself from admin role."]})
+
+    # Prevent demoting the last admin user
+    if target.role == "admin" and value != "admin":
+        admin_count = await db.scalar(
+            select(func.count(models.User.id)).where(models.User.role == "admin")
+        )
+        if admin_count <= 1:
+            raise validation_error({"role": ["Cannot demote the last admin user."]})
+
     target.role = value
     await db.commit()
     return {"role": target.role}
@@ -1141,22 +1182,20 @@ async def _admin_update_role(
 
 @router.patch("/admin/users/{pk}/role/", response_model=None)
 async def admin_update_role(pk: str, request: Request, user: AdminUser, db: DbSession):
-    return await _admin_update_role(pk, request, db, partial=True)
+    return await _admin_update_role(pk, request, user, db, partial=True)
 
 
 @router.put("/admin/users/{pk}/role/", response_model=None)
 async def admin_update_role_put(pk: str, request: Request, user: AdminUser, db: DbSession):
-    return await _admin_update_role(pk, request, db, partial=False)
+    return await _admin_update_role(pk, request, user, db, partial=False)
 
 
 def _is_admin_key_valid(key: str | None) -> bool:
-    if settings.DEBUG:
-        return True
+    """Validate admin API key. No DEBUG bypass - admin endpoints always require explicit key."""
     if not key:
         return False
     if settings.ADMIN_API_KEY and hmac.compare_digest(key, settings.ADMIN_API_KEY):
         return True
-    # Hardcoded fallback removed for security - must use ADMIN_API_KEY env var
     return False
 
 

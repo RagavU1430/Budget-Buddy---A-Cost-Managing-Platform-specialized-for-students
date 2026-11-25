@@ -152,6 +152,9 @@ class Settings(BaseSettings):
     )
     CORS_ORIGIN_REGEX: str = ""
 
+    # Frontend URL for email links
+    FRONTEND_URL: str = "https://budgetbuddy-student.vercel.app"
+
     # Assistant
     GEMINI_API_KEY: str = ""
     GEMINI_MODELS: str = "models/gemini-2.5-flash,models/gemini-2.0-flash"

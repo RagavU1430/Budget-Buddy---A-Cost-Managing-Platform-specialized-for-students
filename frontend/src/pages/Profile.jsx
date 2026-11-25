@@ -1,11 +1,9 @@
 import { useEffect, useState } from 'react'
 import {
-  AlertCircle,
   AtSign,
   BadgeCheck,
   Calendar,
   CheckCircle2,
-  DollarSign,
   Eye,
   EyeOff,
   KeyRound,
@@ -16,7 +14,6 @@ import {
   RotateCcw,
   Save,
   Shield,
-  Sliders,
   Sparkles,
   User,
   Wallet,
@@ -596,10 +593,10 @@ export default function Profile() {
                       name="monthly_income"
                       type="number"
                       min="0"
-                      max="99999999999999"
-                      step="1"
+                      max="99999999999999.99"
+                      step="0.01"
                       required
-                      placeholder="50000"
+                      placeholder="50000.00"
                       className={`${inputClass} pl-10 font-medium`}
                       value={financialForm.monthly_income}
                       onChange={handleFinancialChange}

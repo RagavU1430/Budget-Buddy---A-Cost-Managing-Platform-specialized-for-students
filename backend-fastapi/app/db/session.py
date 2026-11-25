@@ -47,9 +47,11 @@ def _connect_args(url: str) -> dict[str, Any]:
         if hostname and (hostname not in ("localhost", "127.0.0.1") or is_serverless):
             import ssl
 
+            # Use proper SSL context with certificate verification for Supabase
+            # Supabase provides valid certificates - don't disable verification
             ctx = ssl.create_default_context()
-            ctx.check_hostname = False
-            ctx.verify_mode = ssl.CERT_NONE
+            ctx.check_hostname = True
+            ctx.verify_mode = ssl.CERT_REQUIRED
             args["ssl"] = ctx
     except Exception:
         pass

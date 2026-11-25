@@ -108,6 +108,15 @@ async def get_current_user(request: Request, db: DbSession) -> models.User:
     except jwt.InvalidTokenError:
         raise _unauthorized(dict(TOKEN_NOT_VALID), description="Token is invalid") from None
 
+    # Check if access token JTI is revoked (e.g., after password change, logout, reset-amounts)
+    jti = payload.get("jti")
+    if jti:
+        revoked = await db.execute(
+            select(models.RefreshToken).where(models.RefreshToken.jti == jti)
+        )
+        if revoked.scalar_one_or_none():
+            raise _unauthorized({"detail": "Token has been revoked"}, description="Token is invalid")
+
     user_id = payload.get("user_id")
     if not isinstance(user_id, int):
         raise _unauthorized({"detail": "User not found"}, description="Token is invalid")
